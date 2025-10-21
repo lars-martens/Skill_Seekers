@@ -1,17 +1,26 @@
 #!/usr/bin/env python3
 """
-PDF Text Extractor - Proof of Concept (Task B1.2)
+PDF Text Extractor - Enhanced with Chunking (Tasks B1.2 + B1.3)
 
 Extracts text and code blocks from PDF documentation files.
 Uses PyMuPDF (fitz) for fast, high-quality text extraction.
+
+Features:
+    - Text and markdown extraction
+    - Code block detection (font, indent, pattern)
+    - Language detection (19+ languages)
+    - Page chunking and chapter detection (NEW in B1.3)
+    - Code block merging across pages (NEW in B1.3)
 
 Usage:
     python3 pdf_extractor_poc.py input.pdf
     python3 pdf_extractor_poc.py input.pdf --output output.json
     python3 pdf_extractor_poc.py input.pdf --verbose
+    python3 pdf_extractor_poc.py input.pdf --chunk-size 20
+    python3 pdf_extractor_poc.py input.pdf --chunk-size 0  # No chunking
 
 Example:
-    python3 pdf_extractor_poc.py docs/python_guide.pdf --output python_extracted.json
+    python3 pdf_extractor_poc.py docs/python_guide.pdf --output python_extracted.json -v --chunk-size 15
 """
 
 import os
@@ -33,11 +42,13 @@ except ImportError:
 class PDFExtractor:
     """Extract text and code from PDF documentation"""
 
-    def __init__(self, pdf_path, verbose=False):
+    def __init__(self, pdf_path, verbose=False, chunk_size=10):
         self.pdf_path = pdf_path
         self.verbose = verbose
+        self.chunk_size = chunk_size  # Pages per chunk (0 = no chunking)
         self.doc = None
         self.pages = []
+        self.chapters = []  # Detected chapters/sections
 
     def log(self, message):
         """Print message if verbose mode enabled"""
@@ -222,6 +233,161 @@ class PDFExtractor:
 
         return code_blocks
 
+    def detect_chapter_start(self, page_data):
+        """
+        Detect if a page starts a new chapter/section.
+
+        Returns (is_chapter_start, chapter_title) tuple.
+        """
+        headings = page_data.get('headings', [])
+
+        # Check for h1 or h2 at start of page
+        if headings:
+            first_heading = headings[0]
+            # H1 headings are strong indicators of chapters
+            if first_heading['level'] in ['h1', 'h2']:
+                return True, first_heading['text']
+
+        # Check for specific chapter markers in text
+        text = page_data.get('text', '')
+        first_line = text.split('\n')[0] if text else ''
+
+        chapter_patterns = [
+            r'^Chapter\s+\d+',
+            r'^Part\s+\d+',
+            r'^Section\s+\d+',
+            r'^\d+\.\s+[A-Z]',  # "1. Introduction"
+        ]
+
+        for pattern in chapter_patterns:
+            if re.match(pattern, first_line, re.IGNORECASE):
+                return True, first_line.strip()
+
+        return False, None
+
+    def merge_continued_code_blocks(self, pages):
+        """
+        Merge code blocks that are split across pages.
+
+        Detects when a code block at the end of one page continues
+        on the next page.
+        """
+        for i in range(len(pages) - 1):
+            current_page = pages[i]
+            next_page = pages[i + 1]
+
+            # Check if current page has code blocks
+            if not current_page['code_samples']:
+                continue
+
+            # Get last code block of current page
+            last_code = current_page['code_samples'][-1]
+
+            # Check if next page starts with code
+            if not next_page['code_samples']:
+                continue
+
+            first_next_code = next_page['code_samples'][0]
+
+            # Same language and detection method = likely continuation
+            if (last_code['language'] == first_next_code['language'] and
+                last_code['detection_method'] == first_next_code['detection_method']):
+
+                # Check if last code block looks incomplete (doesn't end with closing brace/etc)
+                last_code_text = last_code['code'].rstrip()
+                continuation_indicators = [
+                    not last_code_text.endswith('}'),
+                    not last_code_text.endswith(';'),
+                    last_code_text.endswith(','),
+                    last_code_text.endswith('\\'),
+                ]
+
+                if any(continuation_indicators):
+                    # Merge the code blocks
+                    merged_code = last_code['code'] + '\n' + first_next_code['code']
+                    last_code['code'] = merged_code
+                    last_code['merged_from_next_page'] = True
+
+                    # Remove the first code block from next page
+                    next_page['code_samples'].pop(0)
+                    next_page['code_blocks_count'] -= 1
+
+                    self.log(f"  Merged code block from page {i+1} to {i+2}")
+
+        return pages
+
+    def create_chunks(self, pages):
+        """
+        Create chunks of pages for better organization.
+
+        Returns array of chunks, each containing:
+        - chunk_number
+        - start_page, end_page
+        - pages (array)
+        - chapter_title (if detected)
+        """
+        if self.chunk_size == 0:
+            # No chunking - return all pages as one chunk
+            return [{
+                'chunk_number': 1,
+                'start_page': 1,
+                'end_page': len(pages),
+                'pages': pages,
+                'chapter_title': None
+            }]
+
+        chunks = []
+        current_chunk = []
+        chunk_start = 0
+        current_chapter = None
+
+        for i, page in enumerate(pages):
+            # Check if this page starts a new chapter
+            is_chapter, chapter_title = self.detect_chapter_start(page)
+
+            if is_chapter and current_chunk:
+                # Save current chunk before starting new one
+                chunks.append({
+                    'chunk_number': len(chunks) + 1,
+                    'start_page': chunk_start + 1,
+                    'end_page': i,
+                    'pages': current_chunk,
+                    'chapter_title': current_chapter
+                })
+                current_chunk = []
+                chunk_start = i
+                current_chapter = chapter_title
+
+            if not current_chapter and is_chapter:
+                current_chapter = chapter_title
+
+            current_chunk.append(page)
+
+            # Check if chunk size reached (but don't break chapters)
+            if not is_chapter and len(current_chunk) >= self.chunk_size:
+                chunks.append({
+                    'chunk_number': len(chunks) + 1,
+                    'start_page': chunk_start + 1,
+                    'end_page': i + 1,
+                    'pages': current_chunk,
+                    'chapter_title': current_chapter
+                })
+                current_chunk = []
+                chunk_start = i + 1
+                current_chapter = None
+
+        # Add remaining pages as final chunk
+        if current_chunk:
+            chunks.append({
+                'chunk_number': len(chunks) + 1,
+                'start_page': chunk_start + 1,
+                'end_page': len(pages),
+                'pages': current_chunk,
+                'chapter_title': current_chapter
+            })
+
+        return chunks
+
     def extract_page(self, page_num):
         """
         Extract content from a single PDF page.
@@ -307,6 +473,14 @@ class PDFExtractor:
             page_data = self.extract_page(page_num)
             self.pages.append(page_data)
 
+        # Merge code blocks that span across pages
+        self.log("\n🔗 Merging code blocks across pages...")
+        self.pages = self.merge_continued_code_blocks(self.pages)
+
+        # Create chunks
+        self.log(f"\n📦 Creating chunks (chunk_size={self.chunk_size})...")
+        chunks = self.create_chunks(self.pages)
+
         # Build summary
         total_chars = sum(p['char_count'] for p in self.pages)
         total_code_blocks = sum(p['code_blocks_count'] for p in self.pages)
@@ -320,6 +494,16 @@ class PDFExtractor:
                 lang = code['language']
                 languages[lang] = languages.get(lang, 0) + 1
 
+        # Extract chapter information
+        chapters = []
+        for chunk in chunks:
+            if chunk['chapter_title']:
+                chapters.append({
+                    'title': chunk['chapter_title'],
+                    'start_page': chunk['start_page'],
+                    'end_page': chunk['end_page']
+                })
+
         result = {
             'source_file': self.pdf_path,
             'metadata': self.doc.metadata,
@@ -328,8 +512,11 @@ class PDFExtractor:
             'total_code_blocks': total_code_blocks,
             'total_headings': total_headings,
             'total_images': total_images,
+            'total_chunks': len(chunks),
+            'chapters': chapters,
             'languages_detected': languages,
-            'pages': self.pages
+            'chunks': chunks,
+            'pages': self.pages  # Still include all pages for compatibility
         }
 
         # Close document
@@ -340,6 +527,8 @@ class PDFExtractor:
         print(f"   Code blocks found: {total_code_blocks}")
         print(f"   Headings found: {total_headings}")
         print(f"   Images found: {total_images}")
+        print(f"   Chunks created: {len(chunks)}")
+        print(f"   Chapters detected: {len(chapters)}")
         print(f"   Languages detected: {', '.join(languages.keys())}")
 
         return result
@@ -369,6 +558,10 @@ Examples:
     parser.add_argument('-o', '--output', help='Output JSON file path (default: print to stdout)')
     parser.add_argument('-v', '--verbose', action='store_true', help='Verbose output')
     parser.add_argument('--pretty', action='store_true', help='Pretty-print JSON output')
+    parser.add_argument('--chunk-size', type=int, default=10,
+                        help='Pages per chunk (0 = no chunking, default: 10)')
+    parser.add_argument('--no-merge', action='store_true',
+                        help='Disable merging code blocks across pages')
 
     args = parser.parse_args()
 
@@ -381,7 +574,7 @@ Examples:
         print(f"⚠️  Warning: File does not have .pdf extension")
 
     # Extract
-    extractor = PDFExtractor(args.pdf_file, verbose=args.verbose)
+    extractor = PDFExtractor(args.pdf_file, verbose=args.verbose, chunk_size=args.chunk_size)
     result = extractor.extract_all()
 
     if result is None:
