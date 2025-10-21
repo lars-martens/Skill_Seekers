@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-PDF Text Extractor - Enhanced with Chunking (Tasks B1.2 + B1.3)
+PDF Text Extractor - Enhanced with Syntax Detection (Tasks B1.2 + B1.3 + B1.4)
 
 Extracts text and code blocks from PDF documentation files.
 Uses PyMuPDF (fitz) for fast, high-quality text extraction.
@@ -8,19 +8,21 @@ Uses PyMuPDF (fitz) for fast, high-quality text extraction.
 Features:
     - Text and markdown extraction
     - Code block detection (font, indent, pattern)
-    - Language detection (19+ languages)
-    - Page chunking and chapter detection (NEW in B1.3)
-    - Code block merging across pages (NEW in B1.3)
+    - Language detection with confidence scoring (19+ languages) (ENHANCED in B1.4)
+    - Syntax validation and quality scoring (NEW in B1.4)
+    - Quality statistics and filtering (NEW in B1.4)
+    - Page chunking and chapter detection (B1.3)
+    - Code block merging across pages (B1.3)
 
 Usage:
     python3 pdf_extractor_poc.py input.pdf
     python3 pdf_extractor_poc.py input.pdf --output output.json
     python3 pdf_extractor_poc.py input.pdf --verbose
     python3 pdf_extractor_poc.py input.pdf --chunk-size 20
-    python3 pdf_extractor_poc.py input.pdf --chunk-size 0  # No chunking
+    python3 pdf_extractor_poc.py input.pdf --min-quality 5.0
 
 Example:
-    python3 pdf_extractor_poc.py docs/python_guide.pdf --output python_extracted.json -v --chunk-size 15
+    python3 pdf_extractor_poc.py docs/python_guide.pdf -o output.json -v --chunk-size 15 --min-quality 6.0
 """
 
 import os
@@ -42,10 +44,11 @@ except ImportError:
 class PDFExtractor:
     """Extract text and code from PDF documentation"""
 
-    def __init__(self, pdf_path, verbose=False, chunk_size=10):
+    def __init__(self, pdf_path, verbose=False, chunk_size=10, min_quality=0.0):
         self.pdf_path = pdf_path
         self.verbose = verbose
         self.chunk_size = chunk_size  # Pages per chunk (0 = no chunking)
+        self.min_quality = min_quality  # Minimum quality score (0-10)
         self.doc = None
         self.pages = []
         self.chapters = []  # Detected chapters/sections
@@ -58,41 +61,252 @@ class PDFExtractor:
     def detect_language_from_code(self, code):
         """
         Detect programming language from code content using patterns.
+        Enhanced in B1.4 with confidence scoring.
 
-        Returns language string or 'unknown'
+        Returns (language, confidence) tuple
         """
         code_lower = code.lower()
 
-        # Language detection patterns
+        # Language detection patterns with weights
         patterns = {
-            'python': [r'\bdef\s+\w+\s*\(', r'\bimport\s+\w+', r'\bclass\s+\w+:', r'\bfrom\s+\w+\s+import'],
-            'javascript': [r'\bfunction\s+\w+\s*\(', r'\bconst\s+\w+\s*=', r'\blet\s+\w+\s*=', r'=>', r'\bconsole\.log'],
-            'java': [r'\bpublic\s+class\s+\w+', r'\bprivate\s+\w+\s+\w+', r'\bSystem\.out\.println'],
-            'cpp': [r'#include\s*<', r'\bstd::', r'\bnamespace\s+\w+', r'cout\s*<<'],
-            'c': [r'#include\s+<\w+\.h>', r'\bprintf\s*\(', r'\bmain\s*\('],
-            'csharp': [r'\bnamespace\s+\w+', r'\bpublic\s+class\s+\w+', r'\busing\s+System'],
-            'go': [r'\bfunc\s+\w+\s*\(', r'\bpackage\s+\w+', r':=', r'\bfmt\.Print'],
-            'rust': [r'\bfn\s+\w+\s*\(', r'\blet\s+mut\s+\w+', r'\bprintln!'],
-            'php': [r'<\?php', r'\$\w+\s*=', r'\bfunction\s+\w+\s*\('],
-            'ruby': [r'\bdef\s+\w+', r'\bend\b', r'\brequire\s+[\'"]'],
-            'swift': [r'\bfunc\s+\w+\s*\(', r'\bvar\s+\w+:', r'\blet\s+\w+:'],
-            'kotlin': [r'\bfun\s+\w+\s*\(', r'\bval\s+\w+\s*=', r'\bvar\s+\w+\s*='],
-            'shell': [r'#!/bin/bash', r'#!/bin/sh', r'\becho\s+', r'\$\{?\w+\}?'],
-            'sql': [r'\bSELECT\s+', r'\bFROM\s+', r'\bWHERE\s+', r'\bINSERT\s+INTO'],
-            'html': [r'<html', r'<div', r'<span', r'<script'],
-            'css': [r'\{\s*[\w-]+\s*:', r'@media', r'\.[\w-]+\s*\{'],
-            'json': [r'^\s*\{', r'^\s*\[', r'"\w+"\s*:'],
-            'yaml': [r'^\w+:', r'^\s+-\s+\w+'],
-            'xml': [r'<\?xml', r'<\w+>'],
+            'python': [
+                (r'\bdef\s+\w+\s*\(', 3),
+                (r'\bimport\s+\w+', 2),
+                (r'\bclass\s+\w+:', 3),
+                (r'\bfrom\s+\w+\s+import', 2),
+                (r':\s*$', 1),  # Lines ending with :
+                (r'^\s{4}|\t', 1),  # Indentation
+            ],
+            'javascript': [
+                (r'\bfunction\s+\w+\s*\(', 3),
+                (r'\bconst\s+\w+\s*=', 2),
+                (r'\blet\s+\w+\s*=', 2),
+                (r'=>', 2),
+                (r'\bconsole\.log', 2),
+                (r'\bvar\s+\w+\s*=', 1),
+            ],
+            'java': [
+                (r'\bpublic\s+class\s+\w+', 4),
+                (r'\bprivate\s+\w+\s+\w+', 2),
+                (r'\bSystem\.out\.println', 3),
+                (r'\bpublic\s+static\s+void', 3),
+            ],
+            'cpp': [
+                (r'#include\s*<', 3),
+                (r'\bstd::', 3),
+                (r'\bnamespace\s+\w+', 2),
+                (r'cout\s*<<', 3),
+                (r'\bvoid\s+\w+\s*\(', 1),
+            ],
+            'c': [
+                (r'#include\s+<\w+\.h>', 4),
+                (r'\bprintf\s*\(', 3),
+                (r'\bmain\s*\(', 2),
+                (r'\bstruct\s+\w+', 2),
+            ],
+            'csharp': [
+                (r'\bnamespace\s+\w+', 3),
+                (r'\bpublic\s+class\s+\w+', 3),
+                (r'\busing\s+System', 3),
+            ],
+            'go': [
+                (r'\bfunc\s+\w+\s*\(', 3),
+                (r'\bpackage\s+\w+', 4),
+                (r':=', 2),
+                (r'\bfmt\.Print', 2),
+            ],
+            'rust': [
+                (r'\bfn\s+\w+\s*\(', 4),
+                (r'\blet\s+mut\s+\w+', 3),
+                (r'\bprintln!', 3),
+                (r'\bimpl\s+\w+', 2),
+            ],
+            'php': [
+                (r'<\?php', 5),
+                (r'\$\w+\s*=', 2),
+                (r'\bfunction\s+\w+\s*\(', 1),
+            ],
+            'ruby': [
+                (r'\bdef\s+\w+', 3),
+                (r'\bend\b', 2),
+                (r'\brequire\s+[\'"]', 2),
+            ],
+            'swift': [
+                (r'\bfunc\s+\w+\s*\(', 3),
+                (r'\bvar\s+\w+:', 2),
+                (r'\blet\s+\w+:', 2),
+            ],
+            'kotlin': [
+                (r'\bfun\s+\w+\s*\(', 4),
+                (r'\bval\s+\w+\s*=', 2),
+                (r'\bvar\s+\w+\s*=', 2),
+            ],
+            'shell': [
+                (r'#!/bin/bash', 5),
+                (r'#!/bin/sh', 5),
+                (r'\becho\s+', 1),
+                (r'\$\{?\w+\}?', 1),
+            ],
+            'sql': [
+                (r'\bSELECT\s+', 4),
+                (r'\bFROM\s+', 3),
+                (r'\bWHERE\s+', 2),
+                (r'\bINSERT\s+INTO', 4),
+                (r'\bCREATE\s+TABLE', 4),
+            ],
+            'html': [
+                (r'<html', 4),
+                (r'<div', 2),
+                (r'<span', 2),
+                (r'<script', 2),
+            ],
+            'css': [
+                (r'\{\s*[\w-]+\s*:', 3),
+                (r'@media', 3),
+                (r'\.[\w-]+\s*\{', 2),
+            ],
+            'json': [
+                (r'^\s*\{', 2),
+                (r'^\s*\[', 2),
+                (r'"\w+"\s*:', 3),
+            ],
+            'yaml': [
+                (r'^\w+:', 2),
+                (r'^\s+-\s+\w+', 2),
+            ],
+            'xml': [
+                (r'<\?xml', 5),
+                (r'<\w+>', 1),
+            ],
         }
 
-        # Check each pattern
+        # Calculate confidence scores for each language
+        scores = {}
         for lang, lang_patterns in patterns.items():
-            for pattern in lang_patterns:
+            score = 0
+            for pattern, weight in lang_patterns:
                 if re.search(pattern, code, re.IGNORECASE | re.MULTILINE):
-                    return lang
+                    score += weight
+            if score > 0:
+                scores[lang] = score
 
-        return 'unknown'
+        if not scores:
+            return 'unknown', 0
+
+        # Get language with highest score
+        best_lang = max(scores, key=scores.get)
+        confidence = min(scores[best_lang] / 10.0, 1.0)  # Normalize to 0-1
+
+        return best_lang, confidence
+
+    def validate_code_syntax(self, code, language):
+        """
+        Validate code syntax (basic checks).
+        Enhanced in B1.4 with syntax validation.
+
+        Returns (is_valid, issues) tuple
+        """
+        issues = []
+
+        # Common syntax checks
+        if not code.strip():
+            return False, ['Empty code block']
+
+        # Language-specific validation
+        if language == 'python':
+            # Check indentation consistency
+            lines = code.split('\n')
+            indent_chars = set()
+            for line in lines:
+                if line.startswith(' '):
+                    indent_chars.add('space')
+                elif line.startswith('\t'):
+                    indent_chars.add('tab')
+
+            if len(indent_chars) > 1:
+                issues.append('Mixed tabs and spaces')
+
+            # Check for unclosed brackets/parens
+            open_count = code.count('(') + code.count('[') + code.count('{')
+            close_count = code.count(')') + code.count(']') + code.count('}')
+            if abs(open_count - close_count) > 2:  # Allow small mismatch
+                issues.append('Unbalanced brackets')
+
+        elif language in ['javascript', 'java', 'cpp', 'c', 'csharp', 'go']:
+            # Check for balanced braces
+            open_braces = code.count('{')
+            close_braces = code.count('}')
+            if abs(open_braces - close_braces) > 1:
+                issues.append('Unbalanced braces')
+
+        elif language == 'json':
+            # Try to parse JSON
+            try:
+                json.loads(code)
+            except:
+                issues.append('Invalid JSON syntax')
+
+        # General checks
+        # Check if code looks like natural language (too many common words)
+        common_words = ['the', 'and', 'for', 'with', 'this', 'that', 'have', 'from']
+        word_count = sum(1 for word in common_words if word in code.lower())
+        if word_count > 5 and len(code.split()) < 50:
+            issues.append('May be natural language, not code')
+
+        # Check code/comment ratio
+        comment_lines = sum(1 for line in code.split('\n') if line.strip().startswith(('#', '//', '/*', '*', '--')))
+        total_lines = len([l for l in code.split('\n') if l.strip()])
+        if total_lines > 0 and comment_lines / total_lines > 0.7:
+            issues.append('Mostly comments')
+
+        return len(issues) == 0, issues
+
+    def score_code_quality(self, code, language, confidence):
+        """
+        Score the quality/usefulness of detected code block.
+        New in B1.4.
+
+        Returns quality score (0-10)
+        """
+        score = 5.0  # Start with neutral score
+
+        # Factor 1: Language detection confidence
+        score += confidence * 2.0
+
+        # Factor 2: Code length (not too short, not too long)
+        code_length = len(code.strip())
+        if 20 <= code_length <= 500:
+            score += 1.0
+        elif 500 < code_length <= 2000:
+            score += 0.5
+        elif code_length < 10:
+            score -= 2.0
+
+        # Factor 3: Number of lines
+        lines = [l for l in code.split('\n') if l.strip()]
+        if 2 <= len(lines) <= 50:
+            score += 1.0
+        elif len(lines) > 100:
+            score -= 1.0
+
+        # Factor 4: Has function/class definitions
+        if re.search(r'\b(def|function|class|func|fn|public class)\b', code):
+            score += 1.5
+
+        # Factor 5: Has meaningful variable names (not just x, y, i)
+        meaningful_vars = re.findall(r'\b[a-z_][a-z0-9_]{3,}\b', code.lower())
+        if len(meaningful_vars) >= 2:
+            score += 1.0
+
+        # Factor 6: Syntax validation
+        is_valid, issues = self.validate_code_syntax(code, language)
+        if is_valid:
+            score += 1.0
+        else:
+            score -= len(issues) * 0.5
+
+        # Clamp score to 0-10 range
+        return max(0, min(10, score))
 
     def detect_code_blocks_by_font(self, page):
         """
@@ -130,10 +344,17 @@ class PDFExtractor:
                         if current_code:
                             code_text = ''.join(current_code).strip()
                             if len(code_text) > 10:  # Minimum code length
-                                lang = self.detect_language_from_code(code_text)
+                                lang, confidence = self.detect_language_from_code(code_text)
+                                quality = self.score_code_quality(code_text, lang, confidence)
+                                is_valid, issues = self.validate_code_syntax(code_text, lang)
+
                                 code_blocks.append({
                                     'code': code_text,
                                     'language': lang,
+                                    'confidence': confidence,
+                                    'quality_score': quality,
+                                    'is_valid': is_valid,
+                                    'validation_issues': issues if not is_valid else [],
                                     'font': current_font,
                                     'detection_method': 'font'
                                 })
@@ -144,10 +365,17 @@ class PDFExtractor:
         if current_code:
             code_text = ''.join(current_code).strip()
             if len(code_text) > 10:
-                lang = self.detect_language_from_code(code_text)
+                lang, confidence = self.detect_language_from_code(code_text)
+                quality = self.score_code_quality(code_text, lang, confidence)
+                is_valid, issues = self.validate_code_syntax(code_text, lang)
+
                 code_blocks.append({
                     'code': code_text,
                     'language': lang,
+                    'confidence': confidence,
+                    'quality_score': quality,
+                    'is_valid': is_valid,
+                    'validation_issues': issues if not is_valid else [],
                     'font': current_font,
                     'detection_method': 'font'
                 })
@@ -178,10 +406,17 @@ class PDFExtractor:
                 if current_block and len(current_block) >= 2:  # At least 2 lines
                     code_text = '\n'.join(current_block).strip()
                     if len(code_text) > 20:  # Minimum code length
-                        lang = self.detect_language_from_code(code_text)
+                        lang, confidence = self.detect_language_from_code(code_text)
+                        quality = self.score_code_quality(code_text, lang, confidence)
+                        is_valid, issues = self.validate_code_syntax(code_text, lang)
+
                         code_blocks.append({
                             'code': code_text,
                             'language': lang,
+                            'confidence': confidence,
+                            'quality_score': quality,
+                            'is_valid': is_valid,
+                            'validation_issues': issues if not is_valid else [],
                             'detection_method': 'indent'
                         })
                 current_block = []
@@ -191,10 +426,17 @@ class PDFExtractor:
         if current_block and len(current_block) >= 2:
             code_text = '\n'.join(current_block).strip()
             if len(code_text) > 20:
-                lang = self.detect_language_from_code(code_text)
+                lang, confidence = self.detect_language_from_code(code_text)
+                quality = self.score_code_quality(code_text, lang, confidence)
+                is_valid, issues = self.validate_code_syntax(code_text, lang)
+
                 code_blocks.append({
                     'code': code_text,
                     'language': lang,
+                    'confidence': confidence,
+                    'quality_score': quality,
+                    'is_valid': is_valid,
+                    'validation_issues': issues if not is_valid else [],
                     'detection_method': 'indent'
                 })
 
@@ -223,10 +465,17 @@ class PDFExtractor:
             for match in matches:
                 code_text = match.group(1).strip()
                 if len(code_text) > 15:
-                    lang = self.detect_language_from_code(code_text)
+                    lang, confidence = self.detect_language_from_code(code_text)
+                    quality = self.score_code_quality(code_text, lang, confidence)
+                    is_valid, issues = self.validate_code_syntax(code_text, lang)
+
                     code_blocks.append({
                         'code': code_text,
                         'language': lang,
+                        'confidence': confidence,
+                        'quality_score': quality,
+                        'is_valid': is_valid,
+                        'validation_issues': issues if not is_valid else [],
                         'detection_method': 'pattern',
                         'pattern_type': block_type
                     })
@@ -419,8 +668,23 @@ class PDFExtractor:
             code_hash = hash(block['code'])
             if code_hash not in unique_code:
                 unique_code[code_hash] = block
+            else:
+                # Keep the one with higher quality score
+                if block['quality_score'] > unique_code[code_hash]['quality_score']:
+                    unique_code[code_hash] = block
 
         code_samples = list(unique_code.values())
+
+        # Filter by minimum quality (NEW in B1.4)
+        if self.min_quality > 0:
+            code_samples_before = len(code_samples)
+            code_samples = [c for c in code_samples if c['quality_score'] >= self.min_quality]
+            filtered_count = code_samples_before - len(code_samples)
+            if filtered_count > 0:
+                self.log(f"  Filtered out {filtered_count} low-quality code blocks (min_quality={self.min_quality})")
+
+        # Sort by quality score (highest first)
+        code_samples.sort(key=lambda x: x['quality_score'], reverse=True)
 
         # Extract headings from markdown
         headings = []
@@ -489,10 +753,30 @@ class PDFExtractor:
 
         # Detect languages used
         languages = {}
+        all_code_blocks_list = []
         for page in self.pages:
             for code in page['code_samples']:
                 lang = code['language']
                 languages[lang] = languages.get(lang, 0) + 1
+                all_code_blocks_list.append(code)
+
+        # Calculate quality statistics (NEW in B1.4)
+        quality_stats = {}
+        if all_code_blocks_list:
+            quality_scores = [c['quality_score'] for c in all_code_blocks_list]
+            confidences = [c['confidence'] for c in all_code_blocks_list]
+            valid_count = sum(1 for c in all_code_blocks_list if c['is_valid'])
+
+            quality_stats = {
+                'average_quality': sum(quality_scores) / len(quality_scores),
+                'average_confidence': sum(confidences) / len(confidences),
+                'valid_code_blocks': valid_count,
+                'invalid_code_blocks': total_code_blocks - valid_count,
+                'validation_rate': valid_count / total_code_blocks if total_code_blocks > 0 else 0,
+                'high_quality_blocks': sum(1 for s in quality_scores if s >= 7.0),
+                'medium_quality_blocks': sum(1 for s in quality_scores if 4.0 <= s < 7.0),
+                'low_quality_blocks': sum(1 for s in quality_scores if s < 4.0),
+            }
 
         # Extract chapter information
         chapters = []
@@ -515,6 +799,7 @@ class PDFExtractor:
             'total_chunks': len(chunks),
             'chapters': chapters,
             'languages_detected': languages,
+            'quality_statistics': quality_stats,  # NEW in B1.4
             'chunks': chunks,
             'pages': self.pages  # Still include all pages for compatibility
         }
@@ -530,6 +815,16 @@ class PDFExtractor:
         print(f"   Chunks created: {len(chunks)}")
         print(f"   Chapters detected: {len(chapters)}")
         print(f"   Languages detected: {', '.join(languages.keys())}")
+
+        # Print quality statistics (NEW in B1.4)
+        if quality_stats:
+            print(f"\n📊 Code Quality Statistics:")
+            print(f"   Average quality: {quality_stats['average_quality']:.1f}/10")
+            print(f"   Average confidence: {quality_stats['average_confidence']:.1%}")
+            print(f"   Valid code blocks: {quality_stats['valid_code_blocks']}/{total_code_blocks} ({quality_stats['validation_rate']:.1%})")
+            print(f"   High quality (7+): {quality_stats['high_quality_blocks']}")
+            print(f"   Medium quality (4-7): {quality_stats['medium_quality_blocks']}")
+            print(f"   Low quality (<4): {quality_stats['low_quality_blocks']}")
 
         return result
 
@@ -562,6 +857,8 @@ Examples:
                         help='Pages per chunk (0 = no chunking, default: 10)')
     parser.add_argument('--no-merge', action='store_true',
                         help='Disable merging code blocks across pages')
+    parser.add_argument('--min-quality', type=float, default=0.0,
+                        help='Minimum code quality score (0-10, default: 0 = no filtering)')
 
     args = parser.parse_args()
 
@@ -574,7 +871,8 @@ Examples:
         print(f"⚠️  Warning: File does not have .pdf extension")
 
     # Extract
-    extractor = PDFExtractor(args.pdf_file, verbose=args.verbose, chunk_size=args.chunk_size)
+    extractor = PDFExtractor(args.pdf_file, verbose=args.verbose,
+                           chunk_size=args.chunk_size, min_quality=args.min_quality)
     result = extractor.extract_all()
 
     if result is None:
