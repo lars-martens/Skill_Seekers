@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """
-PDF Text Extractor - Enhanced with Syntax Detection (Tasks B1.2 + B1.3 + B1.4)
+PDF Text Extractor - Complete Feature Set (Tasks B1.2 + B1.3 + B1.4 + B1.5)
 
-Extracts text and code blocks from PDF documentation files.
-Uses PyMuPDF (fitz) for fast, high-quality text extraction.
+Extracts text, code blocks, and images from PDF documentation files.
+Uses PyMuPDF (fitz) for fast, high-quality extraction.
 
 Features:
     - Text and markdown extraction
     - Code block detection (font, indent, pattern)
-    - Language detection with confidence scoring (19+ languages) (ENHANCED in B1.4)
-    - Syntax validation and quality scoring (NEW in B1.4)
-    - Quality statistics and filtering (NEW in B1.4)
+    - Language detection with confidence scoring (19+ languages) (B1.4)
+    - Syntax validation and quality scoring (B1.4)
+    - Quality statistics and filtering (B1.4)
+    - Image extraction to files (NEW in B1.5)
+    - Image filtering by size (NEW in B1.5)
     - Page chunking and chapter detection (B1.3)
     - Code block merging across pages (B1.3)
 
@@ -20,9 +22,12 @@ Usage:
     python3 pdf_extractor_poc.py input.pdf --verbose
     python3 pdf_extractor_poc.py input.pdf --chunk-size 20
     python3 pdf_extractor_poc.py input.pdf --min-quality 5.0
+    python3 pdf_extractor_poc.py input.pdf --extract-images
+    python3 pdf_extractor_poc.py input.pdf --extract-images --image-dir images/
+    python3 pdf_extractor_poc.py input.pdf --extract-images --min-image-size 200
 
 Example:
-    python3 pdf_extractor_poc.py docs/python_guide.pdf -o output.json -v --chunk-size 15 --min-quality 6.0
+    python3 pdf_extractor_poc.py docs/manual.pdf -o output.json -v --chunk-size 15 --min-quality 6.0 --extract-images
 """
 
 import os
@@ -44,14 +49,19 @@ except ImportError:
 class PDFExtractor:
     """Extract text and code from PDF documentation"""
 
-    def __init__(self, pdf_path, verbose=False, chunk_size=10, min_quality=0.0):
+    def __init__(self, pdf_path, verbose=False, chunk_size=10, min_quality=0.0,
+                 extract_images=False, image_dir=None, min_image_size=100):
         self.pdf_path = pdf_path
         self.verbose = verbose
         self.chunk_size = chunk_size  # Pages per chunk (0 = no chunking)
         self.min_quality = min_quality  # Minimum quality score (0-10)
+        self.extract_images = extract_images  # Extract images to files (NEW in B1.5)
+        self.image_dir = image_dir  # Directory to save images (NEW in B1.5)
+        self.min_image_size = min_image_size  # Minimum image dimension (NEW in B1.5)
         self.doc = None
         self.pages = []
         self.chapters = []  # Detected chapters/sections
+        self.extracted_images = []  # List of extracted image info (NEW in B1.5)
 
     def log(self, message):
         """Print message if verbose mode enabled"""
@@ -637,6 +647,70 @@ class PDFExtractor:
 
         return chunks
 
+    def extract_images_from_page(self, page, page_num):
+        """
+        Extract images from a PDF page and save to disk (NEW in B1.5).
+
+        Returns list of extracted image metadata.
+        """
+        if not self.extract_images:
+            # Just count images, don't extract
+            return []
+
+        extracted = []
+        image_list = page.get_images()
+
+        for img_index, img in enumerate(image_list):
+            try:
+                xref = img[0]  # Image XREF number
+                base_image = self.doc.extract_image(xref)
+
+                if not base_image:
+                    continue
+
+                image_bytes = base_image["image"]
+                image_ext = base_image["ext"]  # png, jpeg, etc.
+                width = base_image.get("width", 0)
+                height = base_image.get("height", 0)
+
+                # Filter out small images (icons, bullets, etc.)
+                if width < self.min_image_size or height < self.min_image_size:
+                    self.log(f"    Skipping small image: {width}x{height}")
+                    continue
+
+                # Generate filename
+                pdf_basename = Path(self.pdf_path).stem
+                image_filename = f"{pdf_basename}_page{page_num+1}_img{img_index+1}.{image_ext}"
+
+                # Save image
+                image_path = Path(self.image_dir) / image_filename
+                image_path.parent.mkdir(parents=True, exist_ok=True)
+
+                with open(image_path, "wb") as f:
+                    f.write(image_bytes)
+
+                # Store metadata
+                image_info = {
+                    'filename': image_filename,
+                    'path': str(image_path),
+                    'page_number': page_num + 1,
+                    'width': width,
+                    'height': height,
+                    'format': image_ext,
+                    'size_bytes': len(image_bytes),
+                    'xref': xref
+                }
+
+                extracted.append(image_info)
+                self.extracted_images.append(image_info)
+                self.log(f"    Extracted image: {image_filename} ({width}x{height})")
+
+            except Exception as e:
+                self.log(f"    Error extracting image {img_index}: {e}")
+                continue
+
+        return extracted
+
     def extract_page(self, page_num):
         """
         Extract content from a single PDF page.
@@ -653,6 +727,9 @@ class PDFExtractor:
 
         # Get page images (for diagrams)
         images = page.get_images()
+
+        # Extract images to files (NEW in B1.5)
+        extracted_images = self.extract_images_from_page(page, page_num)
 
         # Detect code blocks using multiple methods
         font_code_blocks = self.detect_code_blocks_by_font(page)
@@ -705,11 +782,12 @@ class PDFExtractor:
             'headings': headings,
             'code_samples': code_samples,
             'images_count': len(images),
+            'extracted_images': extracted_images,  # NEW in B1.5
             'char_count': len(text),
             'code_blocks_count': len(code_samples)
         }
 
-        self.log(f"  Page {page_num + 1}: {len(text)} chars, {len(code_samples)} code blocks, {len(headings)} headings")
+        self.log(f"  Page {page_num + 1}: {len(text)} chars, {len(code_samples)} code blocks, {len(headings)} headings, {len(extracted_images)} images")
 
         return page_data
 
@@ -730,6 +808,13 @@ class PDFExtractor:
 
         print(f"   Pages: {len(self.doc)}")
         print(f"   Metadata: {self.doc.metadata}")
+
+        # Set up image directory (NEW in B1.5)
+        if self.extract_images and not self.image_dir:
+            pdf_basename = Path(self.pdf_path).stem
+            self.image_dir = f"output/{pdf_basename}_images"
+            print(f"   Image directory: {self.image_dir}")
+
         print("")
 
         # Extract each page
@@ -796,6 +881,9 @@ class PDFExtractor:
             'total_code_blocks': total_code_blocks,
             'total_headings': total_headings,
             'total_images': total_images,
+            'total_extracted_images': len(self.extracted_images),  # NEW in B1.5
+            'image_directory': self.image_dir if self.extract_images else None,  # NEW in B1.5
+            'extracted_images': self.extracted_images,  # NEW in B1.5
             'total_chunks': len(chunks),
             'chapters': chapters,
             'languages_detected': languages,
@@ -812,6 +900,10 @@ class PDFExtractor:
         print(f"   Code blocks found: {total_code_blocks}")
         print(f"   Headings found: {total_headings}")
         print(f"   Images found: {total_images}")
+        if self.extract_images:
+            print(f"   Images extracted: {len(self.extracted_images)}")
+            if self.image_dir:
+                print(f"   Image directory: {self.image_dir}")
         print(f"   Chunks created: {len(chunks)}")
         print(f"   Chapters detected: {len(chapters)}")
         print(f"   Languages detected: {', '.join(languages.keys())}")
@@ -859,6 +951,12 @@ Examples:
                         help='Disable merging code blocks across pages')
     parser.add_argument('--min-quality', type=float, default=0.0,
                         help='Minimum code quality score (0-10, default: 0 = no filtering)')
+    parser.add_argument('--extract-images', action='store_true',
+                        help='Extract images to files (NEW in B1.5)')
+    parser.add_argument('--image-dir', type=str, default=None,
+                        help='Directory to save extracted images (default: output/{pdf_name}_images)')
+    parser.add_argument('--min-image-size', type=int, default=100,
+                        help='Minimum image dimension in pixels (filters icons, default: 100)')
 
     args = parser.parse_args()
 
@@ -871,8 +969,15 @@ Examples:
         print(f"⚠️  Warning: File does not have .pdf extension")
 
     # Extract
-    extractor = PDFExtractor(args.pdf_file, verbose=args.verbose,
-                           chunk_size=args.chunk_size, min_quality=args.min_quality)
+    extractor = PDFExtractor(
+        args.pdf_file,
+        verbose=args.verbose,
+        chunk_size=args.chunk_size,
+        min_quality=args.min_quality,
+        extract_images=args.extract_images,
+        image_dir=args.image_dir,
+        min_image_size=args.min_image_size
+    )
     result = extractor.extract_all()
 
     if result is None:
