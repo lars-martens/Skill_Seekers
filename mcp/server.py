@@ -217,6 +217,34 @@ async def list_tools() -> list[Tool]:
                 "required": ["config_pattern"],
             },
         ),
+        Tool(
+            name="scrape_docx",
+            description="Convert Word documents (.docx) into Claude skills. Extracts text, headings, code blocks, and tables.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "files": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of .docx file paths to process",
+                    },
+                    "skill_name": {
+                        "type": "string",
+                        "description": "Skill name (lowercase, alphanumeric, hyphens, underscores)",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Description of when to use this skill",
+                    },
+                    "skip_extract": {
+                        "type": "boolean",
+                        "description": "Skip extraction, rebuild from cached data (default: false)",
+                        "default": False,
+                    },
+                },
+                "required": ["files", "skill_name", "description"],
+            },
+        ),
     ]
 
 
@@ -243,6 +271,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             return await split_config_tool(arguments)
         elif name == "generate_router":
             return await generate_router_tool(arguments)
+        elif name == "scrape_docx":
+            return await scrape_docx_tool(arguments)
         else:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
@@ -554,6 +584,55 @@ async def generate_router_tool(args: dict) -> list[TextContent]:
         return [TextContent(type="text", text=result.stdout)]
     else:
         return [TextContent(type="text", text=f"Error: {result.stderr}\n\n{result.stdout}")]
+
+
+async def scrape_docx_tool(args: dict) -> list[TextContent]:
+    """Convert Word documents to Claude skill"""
+    files = args["files"]
+    skill_name = args["skill_name"]
+    description = args["description"]
+    skip_extract = args.get("skip_extract", False)
+
+    # Validate files exist (if not skipping extraction)
+    if not skip_extract:
+        missing_files = [f for f in files if not Path(f).exists()]
+        if missing_files:
+            return [TextContent(
+                type="text",
+                text=f"❌ File(s) not found:\n" + "\n".join(f"  - {f}" for f in missing_files)
+            )]
+
+    # Run docx_scraper.py
+    cmd = [
+        sys.executable,
+        str(CLI_DIR / "docx_scraper.py"),
+        "--name", skill_name,
+        "--description", description,
+    ]
+
+    if skip_extract:
+        cmd.append("--skip-extract")
+    else:
+        cmd.extend(files)
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+
+    if result.returncode == 0:
+        output = result.stdout
+
+        # Add next steps
+        output += f"\n\n📦 Next: Package the skill"
+        output += f"\nRun: mcp__skill-seeker__package_skill(skill_dir='output/{skill_name}/')"
+
+        return [TextContent(type="text", text=output)]
+    else:
+        error_text = f"❌ Error processing .docx files\n\n"
+        if result.stderr:
+            error_text += f"Error output:\n{result.stderr}\n\n"
+        if result.stdout:
+            error_text += f"Standard output:\n{result.stdout}"
+
+        return [TextContent(type="text", text=error_text)]
 
 
 async def main():
