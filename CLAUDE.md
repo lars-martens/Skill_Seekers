@@ -35,14 +35,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 🔌 MCP Integration Available
 
-**This repository includes a fully tested MCP server with 9 tools:**
+**This repository includes a fully tested MCP server with 10 tools:**
 - `mcp__skill-seeker__list_configs` - List all available preset configurations
 - `mcp__skill-seeker__generate_config` - Generate a new config file for any docs site
+- `mcp__skill-seeker__fetch_config` - Download configs from API repository (NEW)
 - `mcp__skill-seeker__validate_config` - Validate a config file structure
 - `mcp__skill-seeker__estimate_pages` - Estimate page count before scraping
 - `mcp__skill-seeker__scrape_docs` - Scrape and build a skill
 - `mcp__skill-seeker__package_skill` - Package skill into .zip file (with auto-upload)
-- `mcp__skill-seeker__upload_skill` - Upload .zip to Claude (NEW)
+- `mcp__skill-seeker__upload_skill` - Upload .zip to Claude
 - `mcp__skill-seeker__split_config` - Split large documentation configs
 - `mcp__skill-seeker__generate_router` - Generate router/hub skills
 

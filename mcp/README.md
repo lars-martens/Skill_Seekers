@@ -72,7 +72,7 @@ You should see a list of preset configurations (Godot, React, Vue, etc.).
 
 ## Available Tools
 
-The MCP server exposes 9 tools:
+The MCP server exposes 10 tools:
 
 ### 1. `generate_config`
 Create a new configuration file for any documentation website.
@@ -148,7 +148,25 @@ List all available preset configurations.
 List all available configs
 ```
 
-### 7. `validate_config`
+### 7. `fetch_config`
+Download a config from the Skill Seeker config repository/API. Fetches pre-made configs from a remote source.
+
+**Parameters:**
+- `config_id` (required): Config ID to fetch (e.g., "react", "vue", "django")
+- `api_url` (optional): API URL to fetch from (default: http://localhost:8000/api/configs)
+- `overwrite` (optional): Overwrite existing config if it exists (default: false)
+
+**Example:**
+```
+Fetch the react config from the API
+```
+
+**Note:** Requires the API server to be running. Start it with:
+```bash
+python3 api/server.py
+```
+
+### 8. `validate_config`
 Validate a config file for errors.
 
 **Parameters:**
@@ -159,7 +177,7 @@ Validate a config file for errors.
 Validate configs/godot.json
 ```
 
-### 8. `split_config`
+### 9. `split_config`
 Split large documentation config into multiple focused skills. For 10K+ page documentation.
 
 **Parameters:**
@@ -179,7 +197,7 @@ Split configs/godot.json using router strategy with 5000 pages per skill
 - **router** - Create router/hub skill + specialized sub-skills (RECOMMENDED for 10K+ pages)
 - **size** - Split every N pages (for docs without clear categories)
 
-### 9. `generate_router`
+### 10. `generate_router`
 Generate router/hub skill for split documentation. Creates intelligent routing to sub-skills.
 
 **Parameters:**

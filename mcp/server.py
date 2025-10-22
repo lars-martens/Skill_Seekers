@@ -157,6 +157,30 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="fetch_config",
+            description="Download a config from the Skill Seeker config repository/API. Fetches pre-made configs from a remote source.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "config_id": {
+                        "type": "string",
+                        "description": "Config ID to fetch (e.g., 'react', 'vue', 'django')",
+                    },
+                    "api_url": {
+                        "type": "string",
+                        "description": "API URL to fetch from (default: http://localhost:8000/api/configs)",
+                        "default": "http://localhost:8000/api/configs",
+                    },
+                    "overwrite": {
+                        "type": "boolean",
+                        "description": "Overwrite existing config if it exists (default: false)",
+                        "default": False,
+                    },
+                },
+                "required": ["config_id"],
+            },
+        ),
+        Tool(
             name="validate_config",
             description="Validate a config file for errors.",
             inputSchema={
@@ -237,6 +261,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             return await upload_skill_tool(arguments)
         elif name == "list_configs":
             return await list_configs_tool(arguments)
+        elif name == "fetch_config":
+            return await fetch_config_tool(arguments)
         elif name == "validate_config":
             return await validate_config_tool(arguments)
         elif name == "split_config":
@@ -455,6 +481,66 @@ async def list_configs_tool(args: dict) -> list[TextContent]:
             result += f"  • {config_file.name} - Error reading: {e}\n\n"
 
     return [TextContent(type="text", text=result)]
+
+
+async def fetch_config_tool(args: dict) -> list[TextContent]:
+    """Fetch a config from the API"""
+    import urllib.request
+    import urllib.error
+
+    config_id = args["config_id"]
+    api_url = args.get("api_url", "http://localhost:8000/api/configs")
+    overwrite = args.get("overwrite", False)
+
+    # Check if config already exists
+    config_path = Path("configs") / f"{config_id}.json"
+
+    if config_path.exists() and not overwrite:
+        return [TextContent(type="text", text=f"❌ Config '{config_id}' already exists at {config_path}\n\nUse overwrite=true to replace it.")]
+
+    # Fetch config from API
+    fetch_url = f"{api_url}/{config_id}"
+
+    try:
+        with urllib.request.urlopen(fetch_url) as response:
+            data = json.loads(response.read().decode())
+
+            # Extract the config from the response
+            if "config" in data:
+                config = data["config"]
+            else:
+                return [TextContent(type="text", text=f"❌ Invalid API response: missing 'config' field")]
+
+        # Ensure configs directory exists
+        config_path.parent.mkdir(exist_ok=True)
+
+        # Save config
+        with open(config_path, 'w') as f:
+            json.dump(config, f, indent=2)
+
+        result = f"✅ Config '{config_id}' fetched successfully!\n\n"
+        result += f"Saved to: {config_path}\n\n"
+        result += f"Configuration:\n"
+        result += f"  Name: {config.get('name', config_id)}\n"
+        result += f"  URL: {config.get('base_url', 'N/A')}\n"
+        result += f"  Max pages: {config.get('max_pages', 'N/A')}\n"
+        result += f"  Description: {config.get('description', 'N/A')}\n\n"
+        result += f"Next steps:\n"
+        result += f"  1. Review config: cat {config_path}\n"
+        result += f"  2. Estimate pages: Use estimate_pages tool\n"
+        result += f"  3. Scrape docs: Use scrape_docs tool\n"
+
+        return [TextContent(type="text", text=result)]
+
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return [TextContent(type="text", text=f"❌ Config '{config_id}' not found on server\n\nAvailable configs: Use list_configs tool to see available configs")]
+        else:
+            return [TextContent(type="text", text=f"❌ HTTP Error {e.code}: {e.reason}")]
+    except urllib.error.URLError as e:
+        return [TextContent(type="text", text=f"❌ Connection Error: Could not reach API at {api_url}\n\nMake sure the API server is running:\n  python3 api/server.py\n\nError: {e.reason}")]
+    except Exception as e:
+        return [TextContent(type="text", text=f"❌ Error fetching config: {str(e)}")]
 
 
 async def validate_config_tool(args: dict) -> list[TextContent]:
