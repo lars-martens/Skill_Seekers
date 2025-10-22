@@ -418,6 +418,76 @@ def download_knowledge(knowledge_id):
         download_name=f"{row['name']}.zip"
     )
 
+@app.route('/api/knowledge/<int:knowledge_id>/preview', methods=['GET'])
+def preview_knowledge(knowledge_id):
+    """
+    Get a preview of the SKILL.md file from a knowledge package
+
+    Query params:
+    - lines: Number of lines to preview (default: 50, max: 200)
+    - full: If 'true', return full SKILL.md content (default: false)
+    """
+
+    conn = sqlite3.connect(DATABASE_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM knowledge WHERE id = ? AND status = 'approved'", (knowledge_id,))
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row:
+        return jsonify({'error': 'Knowledge package not found or not approved'}), 404
+
+    file_path = Path(STORAGE_PATH).parent / row['file_path']
+
+    if not file_path.exists():
+        return jsonify({'error': 'File not found on server'}), 404
+
+    # Extract SKILL.md from zip
+    try:
+        with ZipFile(file_path, 'r') as zf:
+            if 'SKILL.md' not in zf.namelist():
+                return jsonify({'error': 'SKILL.md not found in package'}), 404
+
+            # Read SKILL.md content
+            with zf.open('SKILL.md') as f:
+                content = f.read().decode('utf-8')
+
+            # Get query params
+            full = request.args.get('full', 'false').lower() == 'true'
+            max_lines = min(int(request.args.get('lines', 50)), 200)
+
+            if full:
+                # Return full content
+                preview = content
+                is_truncated = False
+            else:
+                # Return limited preview
+                lines = content.split('\n')
+                preview = '\n'.join(lines[:max_lines])
+                is_truncated = len(lines) > max_lines
+
+            # Get file listing
+            file_list = zf.namelist()
+            reference_files = [f for f in file_list if f.startswith('references/')]
+
+            return jsonify({
+                'id': row['id'],
+                'name': row['name'],
+                'title': row['title'],
+                'preview': preview,
+                'is_truncated': is_truncated,
+                'total_lines': len(content.split('\n')),
+                'preview_lines': len(preview.split('\n')),
+                'file_count': len(file_list),
+                'reference_count': len(reference_files),
+                'reference_files': reference_files[:20]  # Limit to first 20
+            })
+
+    except Exception as e:
+        return jsonify({'error': f'Failed to read package: {str(e)}'}), 500
+
 @app.route('/api/categories', methods=['GET'])
 def list_categories():
     """List all available categories with counts"""

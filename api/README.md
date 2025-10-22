@@ -212,6 +212,39 @@ curl -O http://localhost:5000/api/knowledge/1/download
 
 Downloads the .zip file and increments the download counter.
 
+### Preview Knowledge Package
+
+```bash
+GET /api/knowledge/<id>/preview?lines=50&full=false
+```
+
+Query parameters:
+- `lines`: Number of lines to preview (default: 50, max: 200)
+- `full`: If 'true', return full SKILL.md content (default: false)
+
+Example:
+```bash
+curl http://localhost:5000/api/knowledge/1/preview
+curl http://localhost:5000/api/knowledge/1/preview?lines=100
+curl http://localhost:5000/api/knowledge/1/preview?full=true
+```
+
+Response:
+```json
+{
+  "id": 1,
+  "name": "godot",
+  "title": "Godot Game Engine Documentation",
+  "preview": "# Godot Game Engine\n\n...",
+  "is_truncated": true,
+  "total_lines": 342,
+  "preview_lines": 50,
+  "file_count": 45,
+  "reference_count": 12,
+  "reference_files": ["references/index.md", "references/api.md", ...]
+}
+```
+
 ### List Categories
 
 ```bash
