@@ -18,6 +18,7 @@ import cgi
 import io
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
+from urllib.parse import urlparse, parse_qs
 from list_configs import list_configs, load_config_metadata
 from ratings import RatingsManager
 
@@ -52,7 +53,7 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
             self.send_error(404, "Endpoint not found")
 
     def serve_configs_list(self):
-        """Serve the full list of configs."""
+        """Serve the full list of configs with optional filtering."""
         try:
             configs = list_configs()
 
@@ -62,13 +63,62 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
                 if config_id:
                     config["rating"] = self.ratings_manager.get_rating(config_id)
 
-            # Sort by rating score (descending)
-            configs.sort(key=lambda x: x.get("rating", {}).get("score", 0), reverse=True)
+            # Parse query parameters
+            parsed_url = urlparse(self.path)
+            query_params = parse_qs(parsed_url.query)
+
+            # Apply filters
+            filtered_configs = configs
+
+            # Search filter (?q=search_term)
+            if 'q' in query_params:
+                search_term = query_params['q'][0].lower()
+                filtered_configs = [
+                    c for c in filtered_configs
+                    if search_term in c.get('name', '').lower() or
+                       search_term in c.get('description', '').lower() or
+                       search_term in c.get('base_url', '').lower()
+                ]
+
+            # Category filter (?category=getting_started)
+            if 'category' in query_params:
+                category = query_params['category'][0].lower()
+                filtered_configs = [
+                    c for c in filtered_configs
+                    if category in [cat.lower() for cat in c.get('categories', [])]
+                ]
+
+            # Minimum score filter (?min_score=5)
+            if 'min_score' in query_params:
+                try:
+                    min_score = int(query_params['min_score'][0])
+                    filtered_configs = [
+                        c for c in filtered_configs
+                        if c.get('rating', {}).get('score', 0) >= min_score
+                    ]
+                except ValueError:
+                    pass  # Ignore invalid min_score values
+
+            # Sort parameter (?sort=name|score|votes)
+            sort_by = query_params.get('sort', ['score'])[0]
+            if sort_by == 'name':
+                filtered_configs.sort(key=lambda x: x.get('name', '').lower())
+            elif sort_by == 'votes':
+                filtered_configs.sort(key=lambda x: x.get('rating', {}).get('total_votes', 0), reverse=True)
+            else:  # Default: sort by score
+                filtered_configs.sort(key=lambda x: x.get('rating', {}).get('score', 0), reverse=True)
 
             response = {
                 "version": "1.0.0",
-                "total_configs": len(configs),
-                "configs": configs
+                "total_configs": len(filtered_configs),
+                "total_available": len(configs),
+                "filters_applied": {
+                    "search": query_params.get('q', [None])[0],
+                    "category": query_params.get('category', [None])[0],
+                    "min_score": query_params.get('min_score', [None])[0],
+                    "sort": sort_by
+                },
+                "configs": filtered_configs
             }
             self.send_json_response(response)
         except Exception as e:
@@ -102,15 +152,26 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
             "name": "Skill Seeker Config API",
             "version": "1.0.0",
             "endpoints": {
-                "/api/configs": "List all available configs (with ratings)",
+                "/api/configs": "List all available configs (with ratings and filters)",
                 "/api/configs/{id}": "Get specific config by ID",
                 "/api/upload": "Upload a new config (POST)",
                 "/api/vote/{id}/upvote": "Upvote a config (POST)",
                 "/api/vote/{id}/downvote": "Downvote a config (POST)",
                 "/upload": "Upload form (web UI)"
             },
+            "query_parameters": {
+                "q": "Search term (searches name, description, url)",
+                "category": "Filter by category",
+                "min_score": "Minimum rating score",
+                "sort": "Sort by: name, score (default), votes"
+            },
             "examples": {
                 "list_all": "curl http://localhost:8000/api/configs",
+                "search": "curl 'http://localhost:8000/api/configs?q=react'",
+                "filter_category": "curl 'http://localhost:8000/api/configs?category=getting_started'",
+                "min_score": "curl 'http://localhost:8000/api/configs?min_score=5'",
+                "sort_by_name": "curl 'http://localhost:8000/api/configs?sort=name'",
+                "combined": "curl 'http://localhost:8000/api/configs?q=framework&min_score=3&sort=votes'",
                 "get_react": "curl http://localhost:8000/api/configs/react",
                 "upload_form": "Open http://localhost:8000/upload in browser",
                 "upvote": "curl -X POST http://localhost:8000/api/vote/react/upvote",

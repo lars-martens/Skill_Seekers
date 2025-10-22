@@ -51,18 +51,47 @@ python3 api/server.py 3000
 
 ### GET /api/configs
 
-List all available configs with metadata and ratings. Configs are sorted by rating score (descending).
+List all available configs with metadata and ratings. Supports search, filtering, and sorting.
 
-**Example:**
+**Query Parameters:**
+- `q` - Search term (searches name, description, url)
+- `category` - Filter by category name
+- `min_score` - Minimum rating score
+- `sort` - Sort by: `name`, `score` (default), or `votes`
+
+**Examples:**
 ```bash
+# List all configs
 curl http://localhost:8000/api/configs
+
+# Search for "react"
+curl 'http://localhost:8000/api/configs?q=react'
+
+# Filter by category
+curl 'http://localhost:8000/api/configs?category=getting_started'
+
+# Minimum score of 5
+curl 'http://localhost:8000/api/configs?min_score=5'
+
+# Sort by name
+curl 'http://localhost:8000/api/configs?sort=name'
+
+# Combined filters
+curl 'http://localhost:8000/api/configs?q=framework&min_score=3&sort=votes'
 ```
 
 **Response:**
 ```json
 {
   "version": "1.0.0",
-  "total_configs": 13,
+  "total_configs": 3,
+  "total_available": 13,
+  "filters_applied": {
+    "search": "react",
+    "category": null,
+    "min_score": null,
+    "sort": "score"
+  },
   "configs": [
     {
       "id": "react",
