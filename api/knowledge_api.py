@@ -514,6 +514,167 @@ def list_categories():
 
     return jsonify({'categories': results})
 
+@app.route('/api/knowledge/<int:knowledge_id>/related', methods=['GET'])
+def get_related_knowledge(knowledge_id):
+    """
+    Get related knowledge packages based on category, framework, and tags
+
+    Query params:
+    - limit: Maximum results (default: 5)
+    """
+
+    limit = min(int(request.args.get('limit', 5)), 20)
+
+    conn = sqlite3.connect(DATABASE_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    # Get the source package
+    cursor.execute("SELECT * FROM knowledge WHERE id = ? AND status = 'approved'", (knowledge_id,))
+    source = cursor.fetchone()
+
+    if not source:
+        conn.close()
+        return jsonify({'error': 'Knowledge package not found or not approved'}), 404
+
+    # Find related packages using scoring algorithm
+    # Score: +3 for same category, +2 for same framework, +1 for shared tags
+    query = """
+        SELECT
+            k.*,
+            (CASE WHEN k.category = ? THEN 3 ELSE 0 END +
+             CASE WHEN k.framework = ? AND k.framework != '' THEN 2 ELSE 0 END) as score
+        FROM knowledge k
+        WHERE k.id != ? AND k.status = 'approved'
+        ORDER BY score DESC, k.downloads DESC
+        LIMIT ?
+    """
+
+    cursor.execute(query, (source['category'], source['framework'], knowledge_id, limit))
+    rows = cursor.fetchall()
+
+    results = []
+    for row in rows:
+        if row['score'] > 0:  # Only include if there's some relation
+            results.append({
+                'id': row['id'],
+                'name': row['name'],
+                'title': row['title'],
+                'description': row['description'],
+                'category': row['category'],
+                'framework': row['framework'],
+                'downloads': row['downloads'],
+                'rating_avg': row['rating_avg'],
+                'relevance_score': row['score']
+            })
+
+    conn.close()
+
+    return jsonify({
+        'source_id': knowledge_id,
+        'source_title': source['title'],
+        'related': results,
+        'count': len(results)
+    })
+
+@app.route('/api/knowledge/<int:knowledge_id>/suggest-tags', methods=['GET'])
+def suggest_tags(knowledge_id):
+    """
+    Suggest additional tags for a knowledge package based on content analysis
+
+    This analyzes the SKILL.md content and suggests relevant tags
+    """
+
+    conn = sqlite3.connect(DATABASE_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM knowledge WHERE id = ?", (knowledge_id,))
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row:
+        return jsonify({'error': 'Knowledge package not found'}), 404
+
+    file_path = Path(STORAGE_PATH).parent / row['file_path']
+
+    if not file_path.exists():
+        return jsonify({'error': 'File not found on server'}), 404
+
+    try:
+        with ZipFile(file_path, 'r') as zf:
+            if 'SKILL.md' not in zf.namelist():
+                return jsonify({'error': 'SKILL.md not found in package'}), 404
+
+            # Read SKILL.md
+            with zf.open('SKILL.md') as f:
+                content = f.read().decode('utf-8').lower()
+
+            # Common technology keywords to look for
+            tag_keywords = {
+                'web': ['web', 'html', 'css', 'http', 'browser'],
+                'api': ['api', 'rest', 'graphql', 'endpoint'],
+                'database': ['database', 'sql', 'query', 'table'],
+                'frontend': ['frontend', 'ui', 'component', 'jsx', 'tsx'],
+                'backend': ['backend', 'server', 'middleware'],
+                '3d': ['3d', 'mesh', 'shader', 'render'],
+                '2d': ['2d', 'sprite', 'canvas'],
+                'game': ['game', 'player', 'scene', 'physics'],
+                'mobile': ['mobile', 'android', 'ios', 'app'],
+                'cloud': ['cloud', 'aws', 'azure', 'deployment'],
+                'testing': ['test', 'testing', 'unit test', 'integration'],
+                'async': ['async', 'promise', 'await', 'concurrent'],
+                'realtime': ['realtime', 'websocket', 'streaming'],
+                'authentication': ['auth', 'login', 'oauth', 'jwt'],
+                'documentation': ['docs', 'documentation', 'guide'],
+            }
+
+            # Find matching tags
+            suggested_tags = []
+            existing_tags = set(row['tags'].lower().split(',')) if row['tags'] else set()
+
+            for tag, keywords in tag_keywords.items():
+                if tag not in existing_tags:
+                    if any(keyword in content for keyword in keywords):
+                        suggested_tags.append(tag)
+
+            return jsonify({
+                'id': knowledge_id,
+                'name': row['name'],
+                'current_tags': row['tags'].split(',') if row['tags'] else [],
+                'suggested_tags': suggested_tags,
+                'suggestion_count': len(suggested_tags)
+            })
+
+    except Exception as e:
+        return jsonify({'error': f'Failed to analyze package: {str(e)}'}), 500
+
+@app.route('/api/frameworks', methods=['GET'])
+def list_frameworks():
+    """List all frameworks with counts"""
+
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT framework, COUNT(*) as count
+        FROM knowledge
+        WHERE status = 'approved' AND framework IS NOT NULL AND framework != ''
+        GROUP BY framework
+        ORDER BY count DESC
+    """)
+
+    results = []
+    for row in cursor.fetchall():
+        results.append({
+            'framework': row[0],
+            'count': row[1]
+        })
+
+    conn.close()
+
+    return jsonify({'frameworks': results})
+
 # ============================================================================
 # Main
 # ============================================================================

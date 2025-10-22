@@ -267,6 +267,89 @@ Response:
 }
 ```
 
+### List Frameworks
+
+```bash
+GET /api/frameworks
+```
+
+Response:
+```json
+{
+  "frameworks": [
+    {
+      "framework": "React",
+      "count": 3
+    },
+    {
+      "framework": "Godot",
+      "count": 2
+    }
+  ]
+}
+```
+
+### Get Related Knowledge
+
+```bash
+GET /api/knowledge/<id>/related?limit=5
+```
+
+Finds related knowledge packages based on category, framework, and tags. Uses scoring algorithm:
+- +3 points for same category
+- +2 points for same framework
+
+Example:
+```bash
+curl http://localhost:5000/api/knowledge/1/related
+```
+
+Response:
+```json
+{
+  "source_id": 1,
+  "source_title": "Godot Game Engine Documentation",
+  "related": [
+    {
+      "id": 5,
+      "name": "unity",
+      "title": "Unity Game Engine",
+      "description": "Unity documentation",
+      "category": "game-engine",
+      "framework": "Unity",
+      "downloads": 50,
+      "rating_avg": 4.2,
+      "relevance_score": 3
+    }
+  ],
+  "count": 1
+}
+```
+
+### Suggest Tags
+
+```bash
+GET /api/knowledge/<id>/suggest-tags
+```
+
+Analyzes SKILL.md content and suggests relevant tags based on keyword detection.
+
+Example:
+```bash
+curl http://localhost:5000/api/knowledge/1/suggest-tags
+```
+
+Response:
+```json
+{
+  "id": 1,
+  "name": "godot",
+  "current_tags": ["game-engine", "godot", "gdscript"],
+  "suggested_tags": ["3d", "2d", "game", "api"],
+  "suggestion_count": 4
+}
+```
+
 ---
 
 ## Categories
