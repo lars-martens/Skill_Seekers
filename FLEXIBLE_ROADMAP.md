@@ -21,7 +21,7 @@
 Small tasks that build community features incrementally
 
 #### A1: Config Sharing (Website Feature)
-- [ ] **Task A1.1:** Create simple JSON API endpoint to list configs
+- [x] **Task A1.1:** Create simple JSON API endpoint to list configs ✅
 - [ ] **Task A1.2:** Add MCP tool `fetch_config` to download from website
 - [ ] **Task A1.3:** Create basic config upload form (HTML + backend)
 - [ ] **Task A1.4:** Add config rating/voting system
