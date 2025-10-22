@@ -95,6 +95,55 @@ curl http://localhost:8000/api/configs/react
 
 Get API information and available endpoints.
 
+### GET /upload
+
+Serve the web-based config upload form. Opens a user-friendly HTML form for uploading configs.
+
+**Example:**
+Open http://localhost:8000/upload in your browser.
+
+**Features:**
+- Upload .json files directly
+- Paste JSON config manually
+- Automatic validation
+- Saves to `configs/community/` directory
+
+### POST /api/upload
+
+Upload a new config (backend endpoint used by the form).
+
+**Parameters:**
+- `file`: Config .json file (multipart form data), OR
+- `name` + `config_json`: Config name and JSON text
+
+**Example (file upload):**
+```bash
+curl -F "file=@my-config.json" http://localhost:8000/api/upload
+```
+
+**Example (JSON paste):**
+```bash
+curl -X POST http://localhost:8000/api/upload \
+  -F "name=my-framework" \
+  -F 'config_json={"name":"my-framework","base_url":"..."}'
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Config 'my-framework' uploaded successfully!",
+  "path": "configs/community/my-framework.json",
+  "status": "pending_review"
+}
+```
+
+**Notes:**
+- Uploaded configs are saved to `configs/community/` directory
+- Community configs are git-ignored (not committed automatically)
+- Configs are marked as "pending_review" status
+- Duplicate names are rejected (409 Conflict)
+
 ## Response Format
 
 ### Config Metadata

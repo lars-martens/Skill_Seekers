@@ -42,3 +42,6 @@ Thumbs.db
 
 # Backups
 *.backup
+
+# Community uploads (not committed to repo)
+configs/community/
