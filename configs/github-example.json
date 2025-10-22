@@ -1,0 +1,46 @@
+{
+  "type": "github",
+  "name": "anthropic-sdk-python",
+  "description": "Anthropic Python SDK - Official Python library for Claude API",
+  "repository": {
+    "url": "https://github.com/anthropics/anthropic-sdk-python",
+    "owner": "anthropics",
+    "repo": "anthropic-sdk-python",
+    "branch": "main"
+  },
+  "extraction": {
+    "max_files": 200,
+    "include_tests": true,
+    "file_extensions": [
+      ".py",
+      ".md",
+      ".rst"
+    ],
+    "exclude_patterns": [
+      "node_modules/",
+      ".git/",
+      "__pycache__/",
+      "*.pyc",
+      "build/",
+      "dist/"
+    ]
+  },
+  "components": {
+    "extract_readme": true,
+    "extract_docstrings": true,
+    "extract_comments": true,
+    "extract_signatures": true,
+    "extract_test_examples": true
+  },
+  "metadata": {
+    "programming_languages": [
+      "python"
+    ],
+    "topics": [
+      "anthropic",
+      "claude",
+      "ai",
+      "sdk"
+    ]
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "type": "github",
+  "name": "react",
+  "description": "React - A JavaScript library for building user interfaces",
+  "repository": {
+    "url": "https://github.com/facebook/react",
+    "owner": "facebook",
+    "repo": "react",
+    "branch": "main"
+  },
+  "extraction": {
+    "max_files": 300,
+    "include_tests": true,
+    "file_extensions": [
+      ".js",
+      ".jsx",
+      ".ts",
+      ".tsx",
+      ".md"
+    ],
+    "exclude_patterns": [
+      "node_modules/",
+      ".git/",
+      "build/",
+      "dist/",
+      "coverage/",
+      "*.min.js"
+    ]
+  },
+  "components": {
+    "extract_readme": true,
+    "extract_docstrings": true,
+    "extract_comments": true,
+    "extract_signatures": true,
+    "extract_test_examples": true
+  },
+  "focus_areas": {
+    "core": [
+      "packages/react/",
+      "packages/react-dom/"
+    ],
+    "hooks": [
+      "packages/react/src/ReactHooks.js"
+    ],
+    "reconciler": [
+      "packages/react-reconciler/"
+    ]
+  },
+  "metadata": {
+    "programming_languages": [
+      "javascript",
+      "typescript"
+    ],
+    "topics": [
+      "react",
+      "javascript",
+      "ui",
+      "frontend"
+    ]
+  }
+}
