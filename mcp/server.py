@@ -217,6 +217,43 @@ async def list_tools() -> list[Tool]:
                 "required": ["config_pattern"],
             },
         ),
+        Tool(
+            name="fetch_knowledge",
+            description="Fetch and download knowledge packages from the Skill Seeker API. List available skills, search by category, or download specific packages.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "Action to perform: 'list', 'search', 'download', 'details'",
+                        "enum": ["list", "search", "download", "details"],
+                    },
+                    "api_url": {
+                        "type": "string",
+                        "description": "API base URL (default: http://localhost:5000)",
+                        "default": "http://localhost:5000",
+                    },
+                    "knowledge_id": {
+                        "type": "integer",
+                        "description": "Knowledge package ID (for 'download' or 'details' actions)",
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": "Filter by category (for 'list' or 'search' actions)",
+                    },
+                    "framework": {
+                        "type": "string",
+                        "description": "Filter by framework (for 'list' or 'search' actions)",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max results to return (default: 10)",
+                        "default": 10,
+                    },
+                },
+                "required": ["action"],
+            },
+        ),
     ]
 
 
@@ -243,6 +280,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             return await split_config_tool(arguments)
         elif name == "generate_router":
             return await generate_router_tool(arguments)
+        elif name == "fetch_knowledge":
+            return await fetch_knowledge_tool(arguments)
         else:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
@@ -554,6 +593,147 @@ async def generate_router_tool(args: dict) -> list[TextContent]:
         return [TextContent(type="text", text=result.stdout)]
     else:
         return [TextContent(type="text", text=f"Error: {result.stderr}\n\n{result.stdout}")]
+
+
+async def fetch_knowledge_tool(args: dict) -> list[TextContent]:
+    """Fetch knowledge packages from API"""
+    import requests
+
+    action = args["action"]
+    api_url = args.get("api_url", "http://localhost:5000")
+
+    try:
+        if action == "list":
+            # List all knowledge packages
+            category = args.get("category")
+            framework = args.get("framework")
+            limit = args.get("limit", 10)
+
+            params = {"limit": limit}
+            if category:
+                params["category"] = category
+            if framework:
+                params["framework"] = framework
+
+            response = requests.get(f"{api_url}/api/knowledge/list", params=params, timeout=10)
+            response.raise_for_status()
+
+            data = response.json()
+            results = data.get("results", [])
+
+            if not results:
+                return [TextContent(type="text", text="No knowledge packages found.")]
+
+            output = f"📚 Available Knowledge Packages ({data['count']} results):\n\n"
+
+            for pkg in results:
+                output += f"  [{pkg['id']}] {pkg['title']}\n"
+                output += f"      Category: {pkg['category']}"
+                if pkg.get('framework'):
+                    output += f" | Framework: {pkg['framework']}"
+                if pkg.get('version'):
+                    output += f" | Version: {pkg['version']}"
+                output += f"\n      Downloads: {pkg['downloads']}"
+                if pkg.get('rating_avg'):
+                    output += f" | Rating: {pkg['rating_avg']}/5.0"
+                output += f"\n      Size: {pkg['file_size'] // 1024} KB"
+                if pkg.get('page_count'):
+                    output += f" | Pages: {pkg['page_count']}"
+                output += f"\n      {pkg['description'][:100]}...\n\n"
+
+            output += f"\n💡 Use action='download' with knowledge_id to download a package"
+            output += f"\n💡 Use action='details' with knowledge_id for full information"
+
+            return [TextContent(type="text", text=output)]
+
+        elif action == "details":
+            # Get detailed information about a package
+            knowledge_id = args.get("knowledge_id")
+            if not knowledge_id:
+                return [TextContent(type="text", text="❌ Error: knowledge_id is required for 'details' action")]
+
+            response = requests.get(f"{api_url}/api/knowledge/{knowledge_id}", timeout=10)
+            response.raise_for_status()
+
+            pkg = response.json()
+
+            output = f"📋 Knowledge Package Details:\n\n"
+            output += f"  ID: {pkg['id']}\n"
+            output += f"  Name: {pkg['name']}\n"
+            output += f"  Title: {pkg['title']}\n"
+            output += f"  Description: {pkg['description']}\n"
+            output += f"  Category: {pkg['category']}\n"
+            if pkg.get('framework'):
+                output += f"  Framework: {pkg['framework']}\n"
+            if pkg.get('version'):
+                output += f"  Version: {pkg['version']}\n"
+            output += f"  File Size: {pkg['file_size'] // 1024} KB\n"
+            if pkg.get('page_count'):
+                output += f"  Page Count: {pkg['page_count']}\n"
+            output += f"  Upload Date: {pkg['upload_date']}\n"
+            if pkg.get('uploader_name'):
+                output += f"  Uploader: {pkg['uploader_name']}\n"
+            if pkg.get('source_url'):
+                output += f"  Source URL: {pkg['source_url']}\n"
+            output += f"  Downloads: {pkg['downloads']}\n"
+            if pkg.get('rating_avg'):
+                output += f"  Rating: {pkg['rating_avg']}/5.0 ({pkg['rating_count']} ratings)\n"
+            output += f"  Status: {pkg['status']}\n"
+            if pkg.get('tags'):
+                output += f"  Tags: {pkg['tags']}\n"
+
+            output += f"\n💡 Use action='download' to download this package"
+
+            return [TextContent(type="text", text=output)]
+
+        elif action == "download":
+            # Download a specific package
+            knowledge_id = args.get("knowledge_id")
+            if not knowledge_id:
+                return [TextContent(type="text", text="❌ Error: knowledge_id is required for 'download' action")]
+
+            # Get package details first
+            details_response = requests.get(f"{api_url}/api/knowledge/{knowledge_id}", timeout=10)
+            details_response.raise_for_status()
+            pkg = details_response.json()
+
+            # Download the file
+            download_response = requests.get(f"{api_url}/api/knowledge/{knowledge_id}/download", timeout=30)
+            download_response.raise_for_status()
+
+            # Save to downloads directory
+            downloads_dir = Path("downloads")
+            downloads_dir.mkdir(exist_ok=True)
+
+            filename = f"{pkg['name']}.zip"
+            filepath = downloads_dir / filename
+
+            with open(filepath, 'wb') as f:
+                f.write(download_response.content)
+
+            output = f"✅ Downloaded: {pkg['title']}\n\n"
+            output += f"  Saved to: {filepath}\n"
+            output += f"  Size: {len(download_response.content) // 1024} KB\n"
+            output += f"  Category: {pkg['category']}\n"
+            output += f"\n📤 To use this skill:\n"
+            output += f"  1. Upload to Claude at https://claude.ai/skills\n"
+            output += f"  2. Or unzip and customize: unzip {filepath}\n"
+
+            return [TextContent(type="text", text=output)]
+
+        elif action == "search":
+            # Search is same as list with filters
+            return await fetch_knowledge_tool({**args, "action": "list"})
+
+        else:
+            return [TextContent(type="text", text=f"❌ Unknown action: {action}. Use: list, search, download, details")]
+
+    except requests.exceptions.ConnectionError:
+        return [TextContent(type="text", text=f"❌ Error: Could not connect to API at {api_url}\n\nMake sure the API server is running:\n  python3 api/knowledge_api.py")]
+    except requests.exceptions.HTTPError as e:
+        return [TextContent(type="text", text=f"❌ HTTP Error: {e.response.status_code} - {e.response.text}")]
+    except Exception as e:
+        return [TextContent(type="text", text=f"❌ Error: {str(e)}")]
 
 
 async def main():
