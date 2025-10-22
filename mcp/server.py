@@ -217,6 +217,35 @@ async def list_tools() -> list[Tool]:
                 "required": ["config_pattern"],
             },
         ),
+        Tool(
+            name="scrape_github",
+            description="Scrape GitHub repository and create Claude skill from code. Extracts README, docstrings, signatures, and test examples.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "GitHub repository URL (e.g., https://github.com/owner/repo)",
+                    },
+                    "max_files": {
+                        "type": "integer",
+                        "description": "Maximum files to process (default: 100)",
+                        "default": 100,
+                    },
+                    "include_tests": {
+                        "type": "boolean",
+                        "description": "Extract usage examples from tests (default: true)",
+                        "default": True,
+                    },
+                    "output_dir": {
+                        "type": "string",
+                        "description": "Output directory (default: output)",
+                        "default": "output",
+                    },
+                },
+                "required": ["url"],
+            },
+        ),
     ]
 
 
@@ -243,6 +272,8 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             return await split_config_tool(arguments)
         elif name == "generate_router":
             return await generate_router_tool(arguments)
+        elif name == "scrape_github":
+            return await scrape_github_tool(arguments)
         else:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
@@ -547,6 +578,38 @@ async def generate_router_tool(args: dict) -> list[TextContent]:
 
     if router_name:
         cmd.extend(["--name", router_name])
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+
+    if result.returncode == 0:
+        return [TextContent(type="text", text=result.stdout)]
+    else:
+        return [TextContent(type="text", text=f"Error: {result.stderr}\n\n{result.stdout}")]
+
+
+async def scrape_github_tool(args: dict) -> list[TextContent]:
+    """Scrape GitHub repository and create skill"""
+    url = args["url"]
+    max_files = args.get("max_files", 100)
+    include_tests = args.get("include_tests", True)
+    output_dir = args.get("output_dir", "output")
+
+    # Build command
+    cmd = [
+        sys.executable,
+        str(CLI_DIR / "github_scraper.py"),
+        url,
+        "--output", output_dir,
+        "--max-files", str(max_files),
+    ]
+
+    if not include_tests:
+        cmd.append("--no-tests")
+
+    # Check for GitHub token
+    github_token = os.environ.get("GITHUB_TOKEN")
+    if github_token:
+        cmd.extend(["--token", github_token])
 
     result = subprocess.run(cmd, capture_output=True, text=True)
 
