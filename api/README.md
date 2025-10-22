@@ -239,6 +239,100 @@ curl -X POST http://localhost:8000/api/vote/vue/downvote
 - No authentication required (for simplicity)
 - Votes are counted, not tracked per user
 
+### GET /api/review/pending
+
+List all configs pending review (submitted to `configs/community/`).
+
+**Example:**
+```bash
+curl http://localhost:8000/api/review/pending
+```
+
+**Response:**
+```json
+{
+  "total_pending": 2,
+  "configs": [
+    {
+      "id": "my-framework",
+      "name": "my-framework",
+      "description": "My custom framework",
+      "base_url": "https://example.com",
+      "submitted_at": "2025-10-22T12:30:00",
+      "file_path": "configs/community/my-framework.json"
+    }
+  ]
+}
+```
+
+### GET /api/review/stats
+
+Get review queue statistics.
+
+**Example:**
+```bash
+curl http://localhost:8000/api/review/stats
+```
+
+**Response:**
+```json
+{
+  "pending": 2,
+  "approved": 15,
+  "rejected": 3,
+  "total": 20
+}
+```
+
+### POST /api/review/{config_id}/approve
+
+Approve a community config (moves it from `configs/community/` to `configs/`).
+
+**Example:**
+```bash
+curl -X POST http://localhost:8000/api/review/my-framework/approve \
+  -H "Content-Type: application/json" \
+  -d '{"note": "Great config!"}'
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "status": "approved",
+  "message": "Config 'my-framework' approved and moved to main configs",
+  "new_path": "configs/my-framework.json"
+}
+```
+
+### POST /api/review/{config_id}/reject
+
+Reject a community config (keeps in community dir but marks as rejected).
+
+**Example:**
+```bash
+curl -X POST http://localhost:8000/api/review/my-framework/reject \
+  -H "Content-Type: application/json" \
+  -d '{"note": "Needs better selectors"}'
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "status": "rejected",
+  "message": "Config 'my-framework' rejected",
+  "note": "Needs better selectors"
+}
+```
+
+**Notes:**
+- Review status stored in `api/review_data.json` (git-ignored)
+- Approved configs are moved to main `configs/` directory
+- Rejected configs remain in `configs/community/` but marked as rejected
+- Optional `note` field for reviewer comments
+- No authentication required (for simplicity)
+
 ## Response Format
 
 ### Config Metadata

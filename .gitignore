@@ -48,3 +48,6 @@ configs/community/
 
 # Ratings data (not committed to repo)
 api/ratings_data.json
+
+# Review queue data (not committed to repo)
+api/review_data.json

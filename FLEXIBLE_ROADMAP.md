@@ -26,7 +26,7 @@ Small tasks that build community features incrementally
 - [x] **Task A1.3:** Create basic config upload form (HTML + backend) ✅
 - [x] **Task A1.4:** Add config rating/voting system ✅
 - [x] **Task A1.5:** Add config search/filter functionality ✅
-- [ ] **Task A1.6:** Add user-submitted config review queue
+- [x] **Task A1.6:** Add user-submitted config review queue ✅
 
 **Start Small:** Pick A1.1 first (simple JSON endpoint)
 

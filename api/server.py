@@ -21,13 +21,15 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 from list_configs import list_configs, load_config_metadata
 from ratings import RatingsManager
+from review import ReviewManager
 
 
 class ConfigAPIHandler(BaseHTTPRequestHandler):
     """HTTP request handler for the Config API."""
 
-    # Class-level ratings manager (shared across requests)
+    # Class-level managers (shared across requests)
     ratings_manager = RatingsManager()
+    review_manager = ReviewManager()
 
     def do_GET(self):
         """Handle GET requests."""
@@ -36,6 +38,10 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
         elif self.path.startswith("/api/configs/"):
             config_id = self.path.split("/")[-1]
             self.serve_config_detail(config_id)
+        elif self.path == "/api/review/pending":
+            self.serve_pending_reviews()
+        elif self.path == "/api/review/stats":
+            self.serve_review_stats()
         elif self.path == "/upload":
             self.serve_upload_form()
         elif self.path == "/" or self.path == "/api":
@@ -49,6 +55,8 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
             self.handle_config_upload()
         elif self.path.startswith("/api/vote/"):
             self.handle_vote()
+        elif self.path.startswith("/api/review/"):
+            self.handle_review_action()
         else:
             self.send_error(404, "Endpoint not found")
 
@@ -157,6 +165,10 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
                 "/api/upload": "Upload a new config (POST)",
                 "/api/vote/{id}/upvote": "Upvote a config (POST)",
                 "/api/vote/{id}/downvote": "Downvote a config (POST)",
+                "/api/review/pending": "List configs pending review (GET)",
+                "/api/review/stats": "Review queue statistics (GET)",
+                "/api/review/{id}/approve": "Approve a config (POST)",
+                "/api/review/{id}/reject": "Reject a config (POST)",
                 "/upload": "Upload form (web UI)"
             },
             "query_parameters": {
@@ -175,7 +187,11 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
                 "get_react": "curl http://localhost:8000/api/configs/react",
                 "upload_form": "Open http://localhost:8000/upload in browser",
                 "upvote": "curl -X POST http://localhost:8000/api/vote/react/upvote",
-                "downvote": "curl -X POST http://localhost:8000/api/vote/vue/downvote"
+                "downvote": "curl -X POST http://localhost:8000/api/vote/vue/downvote",
+                "review_pending": "curl http://localhost:8000/api/review/pending",
+                "review_stats": "curl http://localhost:8000/api/review/stats",
+                "approve": "curl -X POST http://localhost:8000/api/review/my-config/approve",
+                "reject": "curl -X POST http://localhost:8000/api/review/my-config/reject -d '{\"note\":\"reason\"}'"
             }
         }
         self.send_json_response(response)
@@ -311,6 +327,68 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
 
         except Exception as e:
             self.send_json_response({"error": f"Vote failed: {str(e)}"}, 500)
+
+    def serve_pending_reviews(self):
+        """Serve list of configs pending review."""
+        try:
+            pending = self.review_manager.get_pending_configs()
+            self.send_json_response({
+                "total_pending": len(pending),
+                "configs": pending
+            })
+        except Exception as e:
+            self.send_error(500, f"Error loading pending reviews: {str(e)}")
+
+    def serve_review_stats(self):
+        """Serve review queue statistics."""
+        try:
+            stats = self.review_manager.get_review_stats()
+            self.send_json_response(stats)
+        except Exception as e:
+            self.send_error(500, f"Error loading review stats: {str(e)}")
+
+    def handle_review_action(self):
+        """Handle review approval/rejection."""
+        try:
+            # Parse path: /api/review/{config_id}/approve or /api/review/{config_id}/reject
+            path_parts = self.path.split("/")
+            if len(path_parts) < 5:
+                self.send_json_response({"error": "Invalid review endpoint. Use /api/review/{config_id}/approve or /api/review/{config_id}/reject"}, 400)
+                return
+
+            config_id = path_parts[3]
+            action = path_parts[4]
+
+            # Parse request body for optional note
+            content_length = int(self.headers.get('Content-Length', 0))
+            note = None
+            if content_length > 0:
+                try:
+                    body = self.rfile.read(content_length).decode('utf-8')
+                    data = json.loads(body)
+                    note = data.get('note')
+                except Exception:
+                    pass  # Note is optional
+
+            # Validate action
+            if action not in ["approve", "reject"]:
+                self.send_json_response({"error": f"Invalid action '{action}'. Use 'approve' or 'reject'"}, 400)
+                return
+
+            # Perform review action
+            if action == "approve":
+                result = self.review_manager.approve_config(config_id, note)
+            else:
+                result = self.review_manager.reject_config(config_id, note)
+
+            self.send_json_response(result)
+
+        except FileNotFoundError as e:
+            self.send_json_response({"error": str(e)}, 404)
+        except FileExistsError as e:
+            self.send_json_response({"error": str(e)}, 409)
+        except Exception as e:
+            self.send_json_response({"error": f"Review action failed: {str(e)}"}, 500)
 
     def send_json_response(self, data: dict, status_code: int = 200):
         """Send a JSON response."""
