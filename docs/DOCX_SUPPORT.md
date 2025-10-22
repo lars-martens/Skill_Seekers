@@ -1,7 +1,7 @@
 # Microsoft Word (.docx) Support
 
 **Status:** In Development (B2 Tasks)
-**Progress:** B2.1-B2.2 Complete
+**Progress:** B2.1-B2.6 Complete (MCP Integration Pending)
 
 ---
 
@@ -27,12 +27,33 @@ Skill Seeker is adding support for extracting documentation from Microsoft Word 
 - Includes document statistics
 - Command-line interface with output options
 
+**B2.3: Heading Extraction** - Completed October 22, 2025
+- Created `cli/extract_docx_headings.py`
+- Extracts H1-H6 headings with hierarchy
+- Auto-categorizes based on heading structure
+- Outputs as JSON, markdown outline, or categories
+
+**B2.4: Code Block Detection** - Completed October 22, 2025
+- Created `cli/extract_docx_code.py`
+- Detects code via monospace fonts
+- Language detection for 15+ languages
+- Context extraction and grouping
+
+**B2.5: Table Conversion** - Completed October 22, 2025
+- Created `cli/extract_docx_tables.py`
+- Extracts tables and converts to markdown
+- Table type detection (API, config, data, etc.)
+- Context paragraph extraction
+
+**B2.6: Complete CLI Tool** - Completed October 22, 2025
+- Created `cli/docx_scraper.py` - full-featured tool
+- Processes single or multiple .docx files
+- Generates SKILL.md and reference files
+- Compatible with Skill Seeker's build pipeline
+- Interactive mode, config file support
+
 ### 🚧 In Progress
 
-**B2.3:** Extract headings and create categories
-**B2.4:** Extract code blocks from Word docs
-**B2.5:** Extract tables and convert to markdown
-**B2.6:** Create `docx_scraper.py` CLI tool
 **B2.7:** Add MCP tool `scrape_docx`
 
 ---
@@ -50,81 +71,101 @@ pip install python-docx>=1.2.0
 
 ## Usage
 
-### Basic Text Extraction (B2.2)
+### Complete Workflow (B2.6) - Recommended
 
-**Extract and print to console:**
+**Interactive mode:**
 ```bash
-python3 cli/extract_docx_text.py document.docx
+python3 cli/docx_scraper.py --interactive
+# Follow prompts to configure skill
 ```
 
-**Extract and save to file:**
+**Single document:**
 ```bash
-python3 cli/extract_docx_text.py document.docx --output extracted.txt
+python3 cli/docx_scraper.py document.docx --name myskill --description "My documentation"
 ```
 
-**Show document statistics:**
+**Multiple documents:**
+```bash
+python3 cli/docx_scraper.py doc1.docx doc2.docx doc3.docx --name myskill
+```
+
+**Rebuild from cached data:**
+```bash
+python3 cli/docx_scraper.py --name myskill --skip-extract
+```
+
+### Individual Component Tools
+
+**Text Extraction (B2.2):**
 ```bash
 python3 cli/extract_docx_text.py document.docx --stats
 ```
 
-**Verbose output:**
+**Heading Extraction (B2.3):**
 ```bash
-python3 cli/extract_docx_text.py document.docx --verbose
+python3 cli/extract_docx_headings.py document.docx --categories
+python3 cli/extract_docx_headings.py document.docx --json --output headings.json
 ```
 
-### Features
+**Code Block Detection (B2.4):**
+```bash
+python3 cli/extract_docx_code.py document.docx --context
+python3 cli/extract_docx_code.py document.docx --by-language --markdown
+```
 
-- ✅ Extracts all paragraph text
-- ✅ Preserves paragraph structure (double newline separation)
-- ✅ Skips empty paragraphs
-- ✅ Shows document statistics (paragraphs, words, characters, tables)
-- ✅ Error handling for missing files and library
-- ✅ Optional file output
-- ✅ UTF-8 encoding support
+**Table Extraction (B2.5):**
+```bash
+python3 cli/extract_docx_tables.py document.docx --context
+python3 cli/extract_docx_tables.py document.docx --detect-type --output tables.md
+```
+
+### Complete Features
+
+- ✅ Extracts text, headings, code blocks, and tables
+- ✅ Auto-categorization based on heading structure
+- ✅ Language detection for code (15+ languages)
+- ✅ Table type detection (API, config, data, etc.)
+- ✅ Generates SKILL.md and reference files
+- ✅ Compatible with existing enhancement pipeline
+- ✅ Interactive configuration wizard
+- ✅ Multi-document support
+- ✅ Cached data reuse (--skip-extract)
 
 ---
 
-## Coming Soon
+## Next: MCP Integration (B2.7)
 
-### B2.3: Heading Extraction
-- Detect Heading 1-6 styles
-- Create category structure from headings
-- Automatic categorization
+### B2.7: MCP Tool Integration
+- Add `mcp__skill-seeker__scrape_docx` tool to MCP server
+- Enable .docx scraping directly from Claude Code
+- Compatible with existing 9 MCP tools
+- Same API as `scrape_docs` but for Word files
 
-### B2.4: Code Block Detection
-- Detect monospace fonts (Courier, Consolas, etc.)
-- Extract code samples
-- Syntax detection via heuristics
+**Expected completion:** October 22, 2025
 
-### B2.5: Table Conversion
-- Extract tables from Word documents
-- Convert to markdown format
-- Preserve table structure
-
-### B2.6: Full CLI Tool
-- Complete `docx_scraper.py` similar to `doc_scraper.py`
-- Config-based scraping
-- Integration with existing Skill Seeker workflow
-- Generate SKILL.md from Word documents
-
-### B2.7: MCP Integration
-- Add `mcp__skill-seeker__scrape_docx` tool
-- Enable .docx scraping from Claude Code
-- Compatible with existing MCP tools
+Once B2.7 is complete, users will be able to:
+```python
+# From Claude Code MCP
+mcp__skill-seeker__scrape_docx(
+    files=["doc1.docx", "doc2.docx"],
+    skill_name="myskill",
+    description="My documentation skill"
+)
+```
 
 ---
 
 ## Roadmap
 
-| Task | Status | Description |
-|------|--------|-------------|
-| B2.1 | ✅ Done | Research .docx parsing libraries |
-| B2.2 | ✅ Done | Create simple text extractor |
-| B2.3 | 🚧 Next | Extract headings and categorize |
-| B2.4 | ⏳ Planned | Extract code blocks |
-| B2.5 | ⏳ Planned | Convert tables to markdown |
-| B2.6 | ⏳ Planned | Create full CLI tool |
-| B2.7 | ⏳ Planned | Add MCP tool integration |
+| Task | Status | Description | File |
+|------|--------|-------------|------|
+| B2.1 | ✅ Done | Research .docx parsing libraries | `docs/research/B2.1_DOCX_PARSING_RESEARCH.md` |
+| B2.2 | ✅ Done | Create simple text extractor | `cli/extract_docx_text.py` |
+| B2.3 | ✅ Done | Extract headings and categorize | `cli/extract_docx_headings.py` |
+| B2.4 | ✅ Done | Extract code blocks | `cli/extract_docx_code.py` |
+| B2.5 | ✅ Done | Convert tables to markdown | `cli/extract_docx_tables.py` |
+| B2.6 | ✅ Done | Create full CLI tool | `cli/docx_scraper.py` |
+| B2.7 | 🚧 Next | Add MCP tool integration | `mcp_server/skill_seeker_server.py` |
 
 ---
 
