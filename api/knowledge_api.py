@@ -675,6 +675,152 @@ def list_frameworks():
 
     return jsonify({'frameworks': results})
 
+@app.route('/api/search', methods=['GET'])
+def search_knowledge():
+    """
+    Full-text search across knowledge packages
+
+    Query params:
+    - q: Search query (required)
+    - category: Filter by category (optional)
+    - framework: Filter by framework (optional)
+    - sort: Sort by 'relevance', 'downloads', 'rating', 'date' (default: relevance)
+    - limit: Maximum results (default: 20, max: 100)
+    - offset: Pagination offset (default: 0)
+    """
+
+    query = request.args.get('q', '').strip()
+    if not query:
+        return jsonify({'error': 'Search query (q) is required'}), 400
+
+    category = request.args.get('category')
+    framework = request.args.get('framework')
+    sort_by = request.args.get('sort', 'relevance')
+    limit = min(int(request.args.get('limit', 20)), 100)
+    offset = int(request.args.get('offset', 0))
+
+    conn = sqlite3.connect(DATABASE_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    # Build search query
+    # SQLite doesn't have great full-text search without FTS5, so we use LIKE
+    # In production, you'd want to use FTS5 or external search engine
+
+    search_pattern = f"%{query}%"
+
+    sql = """
+        SELECT
+            *,
+            (
+                CASE WHEN title LIKE ? THEN 10 ELSE 0 END +
+                CASE WHEN name LIKE ? THEN 8 ELSE 0 END +
+                CASE WHEN description LIKE ? THEN 5 ELSE 0 END +
+                CASE WHEN tags LIKE ? THEN 3 ELSE 0 END +
+                CASE WHEN framework LIKE ? THEN 2 ELSE 0 END
+            ) as relevance
+        FROM knowledge
+        WHERE status = 'approved'
+        AND (
+            title LIKE ? OR
+            name LIKE ? OR
+            description LIKE ? OR
+            tags LIKE ? OR
+            framework LIKE ?
+        )
+    """
+
+    params = [search_pattern] * 10  # 5 for scoring + 5 for WHERE
+
+    # Add filters
+    if category:
+        sql += " AND category = ?"
+        params.append(category)
+
+    if framework:
+        sql += " AND framework = ?"
+        params.append(framework)
+
+    # Add sorting
+    if sort_by == 'downloads':
+        sql += " ORDER BY downloads DESC"
+    elif sort_by == 'rating':
+        sql += " ORDER BY rating_avg DESC, rating_count DESC"
+    elif sort_by == 'date':
+        sql += " ORDER BY upload_date DESC"
+    else:  # relevance
+        sql += " ORDER BY relevance DESC, downloads DESC"
+
+    # Add pagination
+    sql += " LIMIT ? OFFSET ?"
+    params.extend([limit, offset])
+
+    cursor.execute(sql, params)
+    rows = cursor.fetchall()
+
+    results = []
+    for row in rows:
+        results.append({
+            'id': row['id'],
+            'name': row['name'],
+            'title': row['title'],
+            'description': row['description'],
+            'category': row['category'],
+            'framework': row['framework'],
+            'version': row['version'],
+            'file_size': row['file_size'],
+            'page_count': row['page_count'],
+            'upload_date': row['upload_date'],
+            'downloads': row['downloads'],
+            'rating_avg': row['rating_avg'],
+            'tags': row['tags'],
+            'source_url': row['source_url'],
+            'relevance_score': row['relevance']
+        })
+
+    # Get total count for pagination
+    count_sql = """
+        SELECT COUNT(*) as total
+        FROM knowledge
+        WHERE status = 'approved'
+        AND (
+            title LIKE ? OR
+            name LIKE ? OR
+            description LIKE ? OR
+            tags LIKE ? OR
+            framework LIKE ?
+        )
+    """
+    count_params = [search_pattern] * 5
+
+    if category:
+        count_sql += " AND category = ?"
+        count_params.append(category)
+
+    if framework:
+        count_sql += " AND framework = ?"
+        count_params.append(framework)
+
+    cursor.execute(count_sql, count_params)
+    total = cursor.fetchone()['total']
+
+    conn.close()
+
+    return jsonify({
+        'query': query,
+        'results': results,
+        'count': len(results),
+        'total': total,
+        'limit': limit,
+        'offset': offset,
+        'has_more': (offset + len(results)) < total,
+        'filters': {
+            'category': category,
+            'framework': framework,
+            'sort': sort_by
+        }
+    })
+
 # ============================================================================
 # Main
 # ============================================================================

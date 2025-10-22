@@ -350,6 +350,74 @@ Response:
 }
 ```
 
+### Search Knowledge
+
+```bash
+GET /api/search?q=<query>&category=<category>&framework=<framework>&sort=<sort>&limit=<limit>&offset=<offset>
+```
+
+Full-text search across all knowledge packages.
+
+Query parameters:
+- `q`: Search query (required)
+- `category`: Filter by category (optional)
+- `framework`: Filter by framework (optional)
+- `sort`: Sort by 'relevance', 'downloads', 'rating', 'date' (default: relevance)
+- `limit`: Max results (default: 20, max: 100)
+- `offset`: Pagination offset (default: 0)
+
+Searches in:
+- Title (weight: 10)
+- Name (weight: 8)
+- Description (weight: 5)
+- Tags (weight: 3)
+- Framework (weight: 2)
+
+Examples:
+```bash
+# Basic search
+curl http://localhost:5000/api/search?q=game
+
+# Search with filters
+curl http://localhost:5000/api/search?q=react&category=web-framework
+
+# Search with sorting
+curl http://localhost:5000/api/search?q=api&sort=downloads
+
+# Paginated search
+curl http://localhost:5000/api/search?q=3d&limit=10&offset=0
+```
+
+Response:
+```json
+{
+  "query": "game",
+  "results": [
+    {
+      "id": 1,
+      "name": "godot",
+      "title": "Godot Game Engine Documentation",
+      "description": "Complete skill for Godot 4.0 game engine",
+      "category": "game-engine",
+      "framework": "Godot",
+      "downloads": 127,
+      "rating_avg": 4.5,
+      "relevance_score": 15
+    }
+  ],
+  "count": 1,
+  "total": 1,
+  "limit": 20,
+  "offset": 0,
+  "has_more": false,
+  "filters": {
+    "category": null,
+    "framework": null,
+    "sort": "relevance"
+  }
+}
+```
+
 ---
 
 ## Categories
