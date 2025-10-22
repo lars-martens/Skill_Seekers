@@ -19,10 +19,14 @@ import io
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from list_configs import list_configs, load_config_metadata
+from ratings import RatingsManager
 
 
 class ConfigAPIHandler(BaseHTTPRequestHandler):
     """HTTP request handler for the Config API."""
+
+    # Class-level ratings manager (shared across requests)
+    ratings_manager = RatingsManager()
 
     def do_GET(self):
         """Handle GET requests."""
@@ -42,6 +46,8 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
         """Handle POST requests."""
         if self.path == "/api/upload":
             self.handle_config_upload()
+        elif self.path.startswith("/api/vote/"):
+            self.handle_vote()
         else:
             self.send_error(404, "Endpoint not found")
 
@@ -49,6 +55,16 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
         """Serve the full list of configs."""
         try:
             configs = list_configs()
+
+            # Add ratings to each config
+            for config in configs:
+                config_id = config.get("id", "")
+                if config_id:
+                    config["rating"] = self.ratings_manager.get_rating(config_id)
+
+            # Sort by rating score (descending)
+            configs.sort(key=lambda x: x.get("rating", {}).get("score", 0), reverse=True)
+
             response = {
                 "version": "1.0.0",
                 "total_configs": len(configs),
@@ -86,15 +102,19 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
             "name": "Skill Seeker Config API",
             "version": "1.0.0",
             "endpoints": {
-                "/api/configs": "List all available configs",
+                "/api/configs": "List all available configs (with ratings)",
                 "/api/configs/{id}": "Get specific config by ID",
                 "/api/upload": "Upload a new config (POST)",
+                "/api/vote/{id}/upvote": "Upvote a config (POST)",
+                "/api/vote/{id}/downvote": "Downvote a config (POST)",
                 "/upload": "Upload form (web UI)"
             },
             "examples": {
                 "list_all": "curl http://localhost:8000/api/configs",
                 "get_react": "curl http://localhost:8000/api/configs/react",
-                "upload_form": "Open http://localhost:8000/upload in browser"
+                "upload_form": "Open http://localhost:8000/upload in browser",
+                "upvote": "curl -X POST http://localhost:8000/api/vote/react/upvote",
+                "downvote": "curl -X POST http://localhost:8000/api/vote/vue/downvote"
             }
         }
         self.send_json_response(response)
@@ -197,6 +217,39 @@ class ConfigAPIHandler(BaseHTTPRequestHandler):
             self.send_json_response({"error": f"Invalid JSON: {str(e)}"}, 400)
         except Exception as e:
             self.send_json_response({"error": f"Upload failed: {str(e)}"}, 500)
+
+    def handle_vote(self):
+        """Handle voting for configs."""
+        try:
+            # Parse path: /api/vote/{config_id}/{action}
+            path_parts = self.path.split("/")
+            if len(path_parts) < 5:
+                self.send_json_response({"error": "Invalid vote endpoint. Use /api/vote/{config_id}/upvote or /api/vote/{config_id}/downvote"}, 400)
+                return
+
+            config_id = path_parts[3]
+            action = path_parts[4]
+
+            # Validate action
+            if action not in ["upvote", "downvote"]:
+                self.send_json_response({"error": f"Invalid action '{action}'. Use 'upvote' or 'downvote'"}, 400)
+                return
+
+            # Perform vote
+            if action == "upvote":
+                rating = self.ratings_manager.upvote(config_id)
+            else:
+                rating = self.ratings_manager.downvote(config_id)
+
+            self.send_json_response({
+                "success": True,
+                "config_id": config_id,
+                "action": action,
+                "rating": rating
+            })
+
+        except Exception as e:
+            self.send_json_response({"error": f"Vote failed: {str(e)}"}, 500)
 
     def send_json_response(self, data: dict, status_code: int = 200):
         """Send a JSON response."""

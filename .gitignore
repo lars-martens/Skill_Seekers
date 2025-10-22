@@ -45,3 +45,6 @@ Thumbs.db
 
 # Community uploads (not committed to repo)
 configs/community/
+
+# Ratings data (not committed to repo)
+api/ratings_data.json

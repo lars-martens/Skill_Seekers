@@ -51,7 +51,7 @@ python3 api/server.py 3000
 
 ### GET /api/configs
 
-List all available configs with metadata.
+List all available configs with metadata and ratings. Configs are sorted by rating score (descending).
 
 **Example:**
 ```bash
@@ -63,7 +63,19 @@ curl http://localhost:8000/api/configs
 {
   "version": "1.0.0",
   "total_configs": 13,
-  "configs": [...]
+  "configs": [
+    {
+      "id": "react",
+      "name": "react",
+      "description": "React framework",
+      "rating": {
+        "upvotes": 15,
+        "downvotes": 2,
+        "score": 13,
+        "total_votes": 17
+      }
+    }
+  ]
 }
 ```
 
@@ -143,6 +155,60 @@ curl -X POST http://localhost:8000/api/upload \
 - Community configs are git-ignored (not committed automatically)
 - Configs are marked as "pending_review" status
 - Duplicate names are rejected (409 Conflict)
+
+### POST /api/vote/{config_id}/upvote
+
+Upvote a config (increases rating score).
+
+**Example:**
+```bash
+curl -X POST http://localhost:8000/api/vote/react/upvote
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "config_id": "react",
+  "action": "upvote",
+  "rating": {
+    "upvotes": 16,
+    "downvotes": 2,
+    "score": 14,
+    "total_votes": 18
+  }
+}
+```
+
+### POST /api/vote/{config_id}/downvote
+
+Downvote a config (decreases rating score).
+
+**Example:**
+```bash
+curl -X POST http://localhost:8000/api/vote/vue/downvote
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "config_id": "vue",
+  "action": "downvote",
+  "rating": {
+    "upvotes": 8,
+    "downvotes": 3,
+    "score": 5,
+    "total_votes": 11
+  }
+}
+```
+
+**Notes:**
+- Ratings are stored in `api/ratings_data.json` (git-ignored)
+- Config list is automatically sorted by rating score
+- No authentication required (for simplicity)
+- Votes are counted, not tracked per user
 
 ## Response Format
 
