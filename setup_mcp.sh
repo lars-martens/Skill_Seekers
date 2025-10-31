@@ -1,11 +1,11 @@
 #!/bin/bash
 # Skill Seeker MCP Server - Quick Setup Script
-# This script automates the MCP server setup for Claude Code
+# This script automates the MCP server setup for Claude Code using uv
 
 set -e  # Exit on error
 
 echo "=================================================="
-echo "Skill Seeker MCP Server - Quick Setup"
+echo "Skill Seeker MCP Server - Quick Setup (uv)"
 echo "=================================================="
 echo ""
 
@@ -15,11 +15,41 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
-# Step 1: Check Python version
-echo "Step 1: Checking Python version..."
+# Step 1: Check uv installation
+echo "Step 1: Checking uv installation..."
+if ! command -v uv &> /dev/null; then
+    echo -e "${YELLOW}⚠${NC} uv not found"
+    echo "uv is a fast Python package installer and resolver"
+    read -p "Install uv now? (y/n) " -n 1 -r
+    echo ""
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        echo "Installing uv..."
+        curl -LsSf https://astral.sh/uv/install.sh | sh || {
+            echo -e "${RED}❌ Failed to install uv${NC}"
+            echo "Please install uv manually: https://github.com/astral-sh/uv"
+            exit 1
+        }
+        # Source the shell config to get uv in PATH
+        export PATH="$HOME/.cargo/bin:$PATH"
+        if ! command -v uv &> /dev/null; then
+            echo -e "${RED}❌ uv installation succeeded but not in PATH${NC}"
+            echo "Please restart your shell or run: export PATH=\"\$HOME/.cargo/bin:\$PATH\""
+            exit 1
+        fi
+    else
+        echo -e "${RED}❌ uv is required for this setup${NC}"
+        echo "Install manually: https://github.com/astral-sh/uv"
+        exit 1
+    fi
+fi
+echo -e "${GREEN}✓${NC} uv found"
+echo ""
+
+# Step 2: Check Python version
+echo "Step 2: Checking Python version..."
 if ! command -v python3 &> /dev/null; then
     echo -e "${RED}❌ Error: python3 not found${NC}"
-    echo "Please install Python 3.7 or higher"
+    echo "Please install Python 3.10 or higher"
     exit 1
 fi
 
@@ -27,40 +57,73 @@ PYTHON_VERSION=$(python3 --version | cut -d' ' -f2)
 echo -e "${GREEN}✓${NC} Python $PYTHON_VERSION found"
 echo ""
 
-# Step 2: Get repository path
+# Step 3: Get repository path
 REPO_PATH=$(pwd)
-echo "Step 2: Repository location"
+echo "Step 3: Repository location"
 echo "Path: $REPO_PATH"
 echo ""
 
-# Step 3: Install dependencies
-echo "Step 3: Installing Python dependencies..."
-echo "This will install: mcp, requests, beautifulsoup4"
+# Step 4: Create virtual environment
+echo "Step 4: Creating virtual environment with uv..."
+if [ -d ".venv" ]; then
+    echo -e "${YELLOW}⚠${NC} .venv already exists"
+    read -p "Recreate virtual environment? (y/n) " -n 1 -r
+    echo ""
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        echo "Removing existing .venv..."
+        rm -rf .venv
+        echo "Creating new virtual environment..."
+        uv venv || {
+            echo -e "${RED}❌ Failed to create virtual environment${NC}"
+            exit 1
+        }
+        echo -e "${GREEN}✓${NC} Virtual environment created"
+    else
+        echo "Using existing virtual environment"
+    fi
+else
+    echo "Creating virtual environment..."
+    uv venv || {
+        echo -e "${RED}❌ Failed to create virtual environment${NC}"
+        exit 1
+    }
+    echo -e "${GREEN}✓${NC} Virtual environment created at .venv"
+fi
+echo ""
+
+# Set paths for venv Python
+VENV_PYTHON="$REPO_PATH/.venv/bin/python3"
+
+# Step 5: Install dependencies
+echo "Step 5: Installing Python dependencies..."
+echo "This will install: mcp, requests, beautifulsoup4, and all project dependencies"
 read -p "Continue? (y/n) " -n 1 -r
 echo ""
 
 if [[ $REPLY =~ ^[Yy]$ ]]; then
-    echo "Installing MCP server dependencies..."
-    pip3 install -r skill_seeker_mcp/requirements.txt || {
-        echo -e "${RED}❌ Failed to install MCP dependencies${NC}"
-        exit 1
-    }
-
-    echo "Installing CLI tool dependencies..."
-    pip3 install requests beautifulsoup4 || {
-        echo -e "${RED}❌ Failed to install CLI dependencies${NC}"
-        exit 1
-    }
-
+    echo "Installing dependencies with uv..."
+    source .venv/bin/activate
+    # Use root requirements.txt if it exists (v2.0.0), otherwise fallback to skill_seeker_mcp/requirements.txt
+    if [ -f "requirements.txt" ]; then
+        uv pip install -r requirements.txt || {
+            echo -e "${RED}❌ Failed to install dependencies${NC}"
+            exit 1
+        }
+    else
+        uv pip install -r skill_seeker_mcp/requirements.txt || {
+            echo -e "${RED}❌ Failed to install dependencies${NC}"
+            exit 1
+        }
+    fi
     echo -e "${GREEN}✓${NC} Dependencies installed successfully"
 else
     echo "Skipping dependency installation"
 fi
 echo ""
 
-# Step 4: Test MCP server
-echo "Step 4: Testing MCP server..."
-timeout 3 python3 skill_seeker_mcp/server.py 2>/dev/null || {
+# Step 6: Test MCP server
+echo "Step 6: Testing MCP server..."
+timeout 3 "$VENV_PYTHON" skill_seeker_mcp/server.py 2>/dev/null || {
     if [ $? -eq 124 ]; then
         echo -e "${GREEN}✓${NC} MCP server starts correctly (timeout expected)"
     else
@@ -69,23 +132,21 @@ timeout 3 python3 skill_seeker_mcp/server.py 2>/dev/null || {
 }
 echo ""
 
-# Step 5: Optional - Run tests
-echo "Step 5: Run test suite? (optional)"
+# Step 7: Optional - Run tests
+echo "Step 7: Run test suite? (optional)"
 read -p "Run MCP tests to verify everything works? (y/n) " -n 1 -r
 echo ""
 
 if [[ $REPLY =~ ^[Yy]$ ]]; then
-    # Check if pytest is installed
-    if ! command -v pytest &> /dev/null; then
-        echo "Installing pytest..."
-        pip3 install pytest || {
-            echo -e "${YELLOW}⚠${NC} Could not install pytest, skipping tests"
-        }
-    fi
+    echo "Installing pytest with uv..."
+    source .venv/bin/activate
+    uv pip install pytest || {
+        echo -e "${YELLOW}⚠${NC} Could not install pytest, skipping tests"
+    }
 
-    if command -v pytest &> /dev/null; then
+    if [ -f ".venv/bin/pytest" ]; then
         echo "Running MCP server tests..."
-        python3 -m pytest tests/test_mcp_server.py -v --tb=short || {
+        "$VENV_PYTHON" -m pytest tests/test_mcp_server.py -v --tb=short || {
             echo -e "${RED}❌ Some tests failed${NC}"
             echo "The server may still work, but please check the errors above"
         }
@@ -95,8 +156,8 @@ else
 fi
 echo ""
 
-# Step 6: Configure Claude Code
-echo "Step 6: Configure Claude Code"
+# Step 8: Configure Claude Code
+echo "Step 8: Configure Claude Code"
 echo "=================================================="
 echo ""
 echo "You need to add this configuration to Claude Code:"
@@ -108,7 +169,7 @@ echo ""
 echo -e "${GREEN}{"
 echo "  \"mcpServers\": {"
 echo "    \"skill-seeker\": {"
-echo "      \"command\": \"python3\","
+echo "      \"command\": \"$VENV_PYTHON\","
 echo "      \"args\": ["
 echo "        \"$REPO_PATH/skill_seeker_mcp/server.py\""
 echo "      ],"
@@ -149,7 +210,7 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
 {
   "mcpServers": {
     "skill-seeker": {
-      "command": "python3",
+      "command": "$VENV_PYTHON",
       "args": [
         "$REPO_PATH/skill_seeker_mcp/server.py"
       ],
@@ -174,32 +235,11 @@ EOF
     fi
 else
     echo "Skipping auto-configuration"
-    echo "Please manually configure Claude Code using the JSON above"
-    echo ""
-    echo "IMPORTANT: Replace \$REPO_PATH with the actual path: $REPO_PATH"
+    echo "Please manually add the skill-seeker configuration to ~/.config/claude-code/mcp.json"
 fi
 echo ""
 
-# Step 7: Test the configuration
-if [ -f ~/.config/claude-code/mcp.json ]; then
-    echo "Step 7: Testing MCP configuration..."
-    echo "Checking if paths are correct..."
-
-    # Extract the configured path
-    if command -v jq &> /dev/null; then
-        CONFIGURED_PATH=$(jq -r '.mcpServers["skill-seeker"].args[0]' ~/.config/claude-code/mcp.json 2>/dev/null || echo "")
-        if [ -n "$CONFIGURED_PATH" ] && [ -f "$CONFIGURED_PATH" ]; then
-            echo -e "${GREEN}✓${NC} MCP server path is valid: $CONFIGURED_PATH"
-        elif [ -n "$CONFIGURED_PATH" ]; then
-            echo -e "${YELLOW}⚠${NC} Warning: Configured path doesn't exist: $CONFIGURED_PATH"
-        fi
-    else
-        echo "Install 'jq' for config validation: brew install jq (macOS) or apt install jq (Linux)"
-    fi
-fi
-echo ""
-
-# Step 8: Final instructions
+# Step 9: Final instructions
 echo "=================================================="
 echo "Setup Complete!"
 echo "=================================================="
@@ -211,25 +251,33 @@ echo "  2. In Claude Code, test with: ${GREEN}\"List all available configs\"${NC
 echo "  3. You should see 9 Skill Seeker tools available"
 echo ""
 echo "Available MCP Tools:"
-echo "  • generate_config   - Create new config files"
-echo "  • estimate_pages    - Estimate scraping time"
-echo "  • scrape_docs       - Scrape documentation"
-echo "  • package_skill     - Create .zip files"
-echo "  • list_configs      - Show available configs"
-echo "  • validate_config   - Validate config files"
+echo "  • list_configs      - List all available preset configurations"
+echo "  • generate_config   - Generate new config files"
+echo "  • validate_config   - Validate config file structure"
+echo "  • estimate_pages    - Estimate page count before scraping"
+echo "  • scrape_docs       - Scrape and build a skill"
+echo "  • package_skill     - Package skill into .zip file"
+echo "  • upload_skill      - Upload .zip to Claude"
+echo "  • split_config      - Split large documentation configs"
+echo "  • generate_router   - Generate router/hub skills"
 echo ""
 echo "Example commands to try in Claude Code:"
 echo "  • ${GREEN}List all available configs${NC}"
-echo "  • ${GREEN}Validate configs/react.json${NC}"
-echo "  • ${GREEN}Generate config for Tailwind at https://tailwindcss.com/docs${NC}"
+echo "  • ${GREEN}Estimate how many pages the React config will scrape${NC}"
+echo "  • ${GREEN}Generate a config for the Django documentation${NC}"
 echo ""
 echo "Documentation:"
 echo "  • MCP Setup Guide: ${YELLOW}docs/MCP_SETUP.md${NC}"
 echo "  • Full docs: ${YELLOW}README.md${NC}"
 echo ""
+echo "Virtual Environment:"
+echo "  • Location: ${YELLOW}$REPO_PATH/.venv${NC}"
+echo "  • Python: ${YELLOW}$VENV_PYTHON${NC}"
+echo "  • Activate: ${YELLOW}source .venv/bin/activate${NC}"
+echo ""
 echo "Troubleshooting:"
 echo "  • Check logs: ~/Library/Logs/Claude Code/ (macOS)"
-echo "  • Test server: python3 skill_seeker_mcp/server.py"
-echo "  • Run tests: python3 -m pytest tests/test_mcp_server.py -v"
+echo "  • Test server: $VENV_PYTHON skill_seeker_mcp/server.py"
+echo "  • Run tests: $VENV_PYTHON -m pytest tests/test_mcp_server.py -v"
 echo ""
 echo "Happy skill creating! 🚀"
